@@ -1,0 +1,58 @@
+[project]
+name = "aircalib"
+version = "0.1.0"
+description = "Make a 30 EUR particulate sensor approach a reference station: Sensor.Community vs EEA calibration pipeline."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Leo Weiss" }]
+dependencies = [
+    "airbase>=1.0.0",
+    "duckdb>=1.5.6",
+    "httpx>=0.28.1",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.2",
+    "pandera[polars]>=0.34.1",
+    "polars>=2.0.0",
+    "pyarrow>=26.0.0",
+    "pydantic-settings>=2.15.0",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "typer>=0.27.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "nbconvert>=7.17.2",
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]
+
+[project.scripts]
+aircalib = "aircalib.cli:app"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PL", "PTH", "ARG", "C4", "PIE", "RET"]
+ignore = [
+    "PLR0913",  # pipeline functions legitimately take several inputs
+    "PLR2004",  # thresholds are named in configs/default.yaml, small literals are fine in tests
+    "RUF001", "RUF002", "RUF003",  # French text and unicode symbols are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.ipynb" = ["E402", "B018", "PLR2004"]
+"tests/*" = ["PLR2004", "ARG001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["network: tests that hit real servers (deselected by default with -m 'not network')"]

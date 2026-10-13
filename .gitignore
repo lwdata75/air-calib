@@ -1,0 +1,24 @@
+# Data is rebuilt by the pipeline, never versioned
+data/
+mlruns/
+mlflow.db
+*.parquet
+*.csv
+*.csv.gz
+*.zip
+
+# Python / tooling
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

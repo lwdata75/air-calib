@@ -1,0 +1,57 @@
+# CLAUDE.md — contexte persistant du projet air-calib
+
+## Le projet
+Projet data de groupe (Mastère Data & IA). **Question business** : peut-on corriger un capteur
+de particules fines grand public (~30 €, Sensor.Community, surtout SDS011) pour qu'il approche
+une station officielle (EEA), et jusqu'à quelle distance d'une station la correction reste fiable ?
+- Zone principale : **Allemagne** (entraînement + validation croisée). **France** : test de transfert.
+- Période : 2024-01-01 → 2025-12-31 (configurable).
+- Cible : PM2.5 horaire de la station EEA (E1a vérifié). Entrées : PM brut + humidité/température
+  au capteur (sonde météo du même site `location`) + contexte.
+
+## Contraintes non négociables
+- Coût 0 € : open data + open source, tout en local (MacBook M5 Pro, 48 Go).
+- Données réelles et sales, plusieurs sources ; pas de Kaggle.
+- Livrable = repo GitHub public `lwdata75/air-calib` : `.py` (récupération, nettoyage), notebooks
+  `.ipynb` (exploration, modèles), `requirements.txt` généré depuis `uv.lock`, README.
+- **La note dépend surtout de la qualité du code de nettoyage/transformation.**
+- Disque : 5–10 Go au final, 20 Go max en pic. Les CSV bruts sont supprimés après conversion.
+
+## Règles de code
+- Python 3.12, `uv`. Polars lazy et/ou DuckDB ; jamais de boucle pandas ligne par ligne.
+- Contrats Pandera (Polars) par couche. Config unique `configs/default.yaml` (Pydantic Settings),
+  aucune valeur magique dans le code.
+- CLI Typer : `python -m aircalib <discover|download|bronze|silver|pair|features|all> [--sample]`.
+- Téléchargements : httpx async, ≤ 8 requêtes simultanées, backoff exponentiel, reprise, manifeste,
+  User-Agent explicite, HTTP/1.1 (l'archive casse HTTP/2).
+- Fonctions pures + tests pytest avec petits jeux piégeux écrits à la main. `ruff`, type hints, docstrings courtes.
+- Rapport d'entonnoir `reports/funnel.md` régénéré à chaque exécution.
+- `data/`, `mlruns/`, `mlflow.db` gitignorés : jamais de données dans le repo.
+
+## Règles pédagogiques
+- Toute la logique dans `src/aircalib/` ; les notebooks importent, exécutent, montrent, expliquent.
+- Chaque bloc de code est précédé d'un Markdown : **Ce qu'on fait / Pourquoi / Ce qu'on observe**.
+- Terme technique défini à sa première apparition ; formules en LaTeX affiché `$$ ... $$`.
+- Tout problème/surprise → `docs/JOURNAL.md` (Constat / Pourquoi / Contournement / Impact).
+- Ne jamais cacher une limite. Notebooks/README/journal en **français** ; code/docstrings en **anglais**.
+
+## Méthode de travail
+- Une étape à la fois (voir `docs/PLAN.md`), résumé + feu vert de l'utilisateur avant la suivante.
+- Vérifier sur données réelles avant d'affirmer ; si la réalité contredit le plan, la réalité gagne
+  (on le note au journal et on prévient).
+- Itérer en `--sample` avant le volume complet. Commit propre (anglais) à la fin de chaque étape.
+
+## Architecture (médaillon)
+`sources → data/raw (temporaire) → data/bronze (Parquet zstd, contenu inchangé + manifeste)
+→ data/silver (nettoyé, horaire UTC, particules+météo jointes) → data/gold (paires × heures + features)
+→ modèles + MLflow (sqlite:///mlflow.db)`. Tables de référence (inventaires, stations, paires) : `data/meta/`.
+
+## Faits vérifiés sur les vraies données (détails dans docs/JOURNAL.md)
+- Archive Sensor.Community : années passées en `/<AAAA>/<AAAA-MM-JJ>/…csv.gz` (gzip !), année en
+  cours en `/<AAAA-MM-JJ>/`. Un listing de jour ≈ 5 Mo et ≈ 65 s. Horodatages UTC (vérifié via l'API live).
+- EEA : un Parquet par point de prélèvement avec tout l'historique ; E1a contient déjà 2024 et 2025.
+  PM2.5 = 6001, PM10 = 5. `Value` en Decimal ; manquants = -999 / Validity -1. Horloge à décalage fixe
+  (pas de trou au changement d'heure) — décalage vérifié par corrélation décalée (notebook 01).
+
+## Convention horaire du projet
+Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

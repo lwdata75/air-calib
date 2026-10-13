@@ -1,0 +1,75 @@
+# Central configuration for the air-calib pipeline.
+# Every threshold, date or URL used by the code lives here (no magic values in src/).
+# Any key can be overridden with an environment variable, e.g.
+#   AIRCALIB_PERIOD__START=2025-01-01
+
+paths:
+  data_dir: data
+  reports_dir: reports
+
+period:
+  start: 2024-01-01
+  end: 2025-12-31
+
+study:
+  main_country: DE      # training / cross-validation zone
+  transfer_country: FR  # out-of-domain transfer test
+
+http:
+  user_agent: "air-calib/0.1 (+https://github.com/lwdata75/air-calib; student research project)"
+  max_concurrency: 8        # polite limit for community-run servers
+  max_retries: 5
+  backoff_base_s: 1.0       # wait = base * 2**attempt (+ jitter)
+  backoff_max_s: 60.0
+  timeout_s: 180.0          # an archive day listing takes ~65 s to render
+
+sensor_community:
+  archive_url: https://archive.sensor.community
+  live_snapshot_url: https://data.sensor.community/static/v2/data.json
+  # Particle sensors we can calibrate (P1 = PM10, P2 = PM2.5).
+  pm_types: [sds011, pms5003, pms7003, sps30]
+  # Probes that report relative humidity (BMP180/BMP280 do not).
+  humidity_types: [bme280, dht22, sht30, sht31, sht35, sht85, htu21d]
+  # Bytes fetched with an HTTP Range request to read a file's first rows.
+  head_bytes: 2048
+
+discovery:
+  # One archive listing per month on this day-of-month gives the sensors
+  # active over the period without listing all 731 days (~65 s each).
+  sample_day_of_month: 15
+  # Day listings are heavy (~5 MB rendered in ~65 s): the server drops connections
+  # when too many run at once.
+  listing_concurrency: 2
+  # Countries whose sensors we resolve positions for.
+  countries: [DE, FR]
+  radii_km: [0.5, 1.0, 1.5, 2.0, 3.0]
+  # Timezone check: close pairs and number of days used for lag cross-correlation.
+  lag_check_pairs_per_country: 4
+  lag_check_max_distance_km: 0.5
+  lag_check_start: 2025-01-06
+  lag_check_days: 14
+  lag_check_max_lag_h: 3
+
+eea:
+  api_url: https://eeadmz1-downloads-api-appservice.azurewebsites.net
+  metadata_url: "https://discomap.eea.europa.eu/App/AQViewer/download?fqn=Airquality_Dissem.b2g.measurements&f=csv"
+  pollutant_vocabulary: http://dd.eionet.europa.eu/vocabulary/aq/pollutant
+  pollutants:
+    pm25: 6001
+    pm10: 5
+  # 2 = E1a (verified), 1 = E2a (unverified, up-to-date). Never evaluate on E2a.
+  dataset: 2
+  aggregation: hour
+  # Hourly-capable measurement types (gravimetric "active" samplers are daily).
+  measurement_types: [automatic]
+  # Declared station clocks kept in scope: mainland DE (UTC+01) and FR (UTC).
+  # Overseas French stations (UTC-04, UTC-03, UTC+03, UTC+04) follow other clocks.
+  timezones: ["UTC", "UTC+01"]
+  # Validity codes kept as usable reference values (1 valid, 2 valid below detection limit, 3 valid below DL substituted).
+  valid_codes: [1, 2, 3]
+  verified_codes: [1]
+  missing_sentinel: -999.0
+
+sample:
+  n_sensors: 20
+  months: 1
