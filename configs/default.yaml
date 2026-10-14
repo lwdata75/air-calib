@@ -225,12 +225,47 @@ evaluation:
   level_bins: [5, 10, 15, 25, 50]
 
 physics:
-  # kappa-Kohler hygroscopic growth (step 5): C = 1 + (kappa / density_ratio) / (1 / a_w - 1).
-  kappa: 0.4               # starting value, fitted on training data in step 5
-  density_ratio: 1.65
-  # C diverges when RH -> 100 %: the correction is never applied above this humidity
-  # (at 95 % C is already ~5.6 and a +-3 % sensor error changes it by a factor ~2).
-  rh_max_pct: 95.0
+  # Two-parameter physical model (step 5), fitted on the training pairs only:
+  #   PM_ref ~ a * PM_raw / C(RH),  C = 1 + (kappa / density_ratio) / (1 / a_w - 1),  a_w = RH / 100
+  # i.e. ln PM_ref = ln a + ln PM_raw - ln C(RH): a = gain (the raw SDS011 under-reads), kappa = hygroscopicity.
+  density_ratio: 1.65       # particle / water density ratio, fixed (only kappa / density_ratio is identifiable)
+  kappa_bounds: [0.0, 1.0]  # ambient aerosol: ~0.1-0.6 (Petters & Kreidenweis, 2007)
+  # C diverges as RH -> 100 %: RH is capped at this value (official hygrometers are +-2-3 % near saturation, and
+  # the fit barely improves below it: 90 % -> MSE 0.4847, 95 % -> 0.4855, 99 % -> 0.4969 on ln PM).
+  rh_cap_pct: 95.0
+  fit_grid_points: 101      # coarse grid on kappa, then golden-section refinement
+  fit_tolerance: 1.0e-5
+
+features:
+  # ln of PM values below this floor is taken at the floor: below ~1 ug/m3 the reference is at its noise level
+  # (validated negatives down to -5, median -0.8), so ln(0.2) vs ln(0.8) would be noise with a large weight.
+  # 12 % of raw sensor hours and 0.6 % of reference hours are below it (training zone).
+  log_floor_ugm3: 1.0
+  # Time features in local civil time (Germany and France share it): traffic and heating follow it, not UTC.
+  local_timezone: Europe/Paris
+  # Rolling statistics over the PAST only: hours (h - w, h], the current hour included, never a later one.
+  rolling_hours: [3, 6, 24]
+  # Share of hours without a valid sensor value over the previous w hours (current hour excluded).
+  missing_window_hours: [24, 168]
+  # Magnus dew-point formula (Alduchov & Eskridge, 1996), T in C.
+  dew_point_a: 17.62
+  dew_point_b: 243.12
+  # Citizen neighbours: other paired sensors within this radius, at least this many valid at the hour.
+  # 3 km: 69 % of usable hours have >= 3 valid neighbours (1 km: 22 %, 5 km: 80 %).
+  neighbour_radius_km: 3.0
+  neighbour_min: 3
+
+cv:
+  # Station-wise folds (GroupKFold): a station and ALL its pairs (both bands) are in one fold.
+  n_folds: 5
+
+health:
+  # Sensor health from citizen neighbours only (no reference): hourly changes of ln PM vs the neighbours'
+  # median, over hours with enough neighbours.
+  min_hours: 500
+  # A sensor is flagged "suspect" below this correlation: the same bound as clock.min_r, by analogy
+  # (the precision / recall at other thresholds is shown in notebook 05).
+  change_corr_min: 0.1
 
 sample:
   # Small but representative subset: per country, sensors spread over the distance range.

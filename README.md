@@ -8,10 +8,10 @@
 Clients visés : une collectivité qui veut un réseau de mesure dense à bas coût, un promoteur
 immobilier, un assureur santé.
 
-**Statut :** étape 4 (exploration) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
+**Statut :** étape 5 (variables, couche gold) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
 [`01`](notebooks/01_sources_et_faisabilite.ipynb), [`02`](notebooks/02_ingestion_bronze.ipynb),
-[`03`](notebooks/03_nettoyage_silver.ipynb) et [`04`](notebooks/04_exploration_paires.ipynb), et le rapport
-d'entonnoir [`reports/funnel.md`](reports/funnel.md). Ce README sera complété au fil des étapes.
+[`03`](notebooks/03_nettoyage_silver.ipynb), [`04`](notebooks/04_exploration_paires.ipynb) et
+[`05`](notebooks/05_features_gold.ipynb), et le rapport d'entonnoir [`reports/funnel.md`](reports/funnel.md). Ce README sera complété au fil des étapes.
 
 ## Le point de départ : un capteur à 30 € sans correction
 
@@ -27,6 +27,27 @@ pente $1 \pm 0{,}35$, ordonnée à l'origine entre −5 et +5 µg/m³, RMSE ≤ 
 La cible la plus manquée est la pente : le capteur brut ne voit qu'environ 60 % de la référence, et ce rapport dépend
 surtout de l'humidité (0,42 en air sec, 0,79 en air saturé). C'est le « avant » ; le modèle sera jugé sur la part de
 paires qu'il fait passer de l'autre côté. Détails : notebook 04.
+
+### Une surprise : le capteur sous-estime, même par temps humide
+
+Les études sur les capteurs optiques à bas coût parlent surtout de **surestimation par temps humide** : les particules
+gonflent d'eau et diffusent plus de lumière. Nos données montrent l'inverse au global : le SDS011 **sous-estime** la
+référence, de plus de moitié en air sec (rapport 0,42), et l'humidité ne fait que **réduire** cette sous-estimation
+(0,79 en air saturé). **Hypothèse la plus probable** : le capteur optique rate les plus fines particules, qui portent
+une grande part de la masse de PM2.5, alors que l'instrument de référence sèche l'échantillon et le pèse (ou en
+mesure la masse par une méthode étalonnée sur la pesée). La croissance par l'humidité existe bien, mais elle part
+d'une lecture trop basse.
+
+D'où le modèle physique retenu, **un gain et une hygroscopicité ajustés ensemble** sur l'entraînement :
+
+$$
+\mathrm{PM}_{\text{réf}} \approx a \cdot \frac{\mathrm{PM}_{\text{brut}}}{C(\mathrm{HR})}, \qquad
+C = 1 + \frac{\kappa / \rho_p}{-1 + 1/a_w}, \qquad a_w = \frac{\mathrm{HR}}{100}
+$$
+
+avec $a = 2{,}39$ (le capteur voit 1/2,39 = 42 % de la référence en air sec) et $\kappa = 0{,}066$, un κ « effectif »
+plus bas que l'hygroscopicité habituelle de l'aérosol, l'humidité officielle étant plafonnée à 95 %. La correction
+κ-Köhler seule, qui divise la mesure, aurait aggravé l'écart. Détails : notebook 05.
 
 ## Un exemple de rigueur : l'horloge des stations, vérifiée et pas supposée, sur toutes les paires
 
@@ -79,6 +100,13 @@ Détails et figures : notebook 02, section 7.
 secondaire, présente quand elle est fiable (≈ 27 % des heures). **La correction n'exige donc pas que la sonde
 d'humidité du capteur fonctionne** : la station météo publique la plus proche suffit.
 
+## Un capteur en panne se repère sans station officielle
+
+Un capteur qui ne suit plus l'air ne suit plus ses voisins. La corrélation des variations horaires d'un capteur avec
+la médiane des capteurs citoyens à moins de 3 km, calculée **sans aucune donnée de station**, retrouve les capteurs
+défectueux repérés par la station avec une **AUC de 0,90** (au seuil 0,1 : précision 84 %, rappel 37 %). Un réseau
+de capteurs peut donc signaler lui-même ses capteurs suspects. Détails : notebook 05, section 6.
+
 ## Données (100 % open data, coût 0 €)
 
 | Source | Rôle | Format réel observé | Licence |
@@ -107,14 +135,16 @@ make setup     # uv sync --frozen
 make test      # tests unitaires hors-ligne
 make lint      # ruff
 make sample    # tout le pipeline sur 10 capteurs par pays et un mois (≈ 1 min)
-make data      # volume complet (≈ 3 h de téléchargement, 13 min de bronze, 4 min de silver ; ≈ 9,4 Go)
+make data      # volume complet (≈ 3 h de téléchargement, 13 min de bronze, 4 min de silver et gold ; ≈ 9,1 Go)
 ```
 
 Commandes détaillées : `python -m aircalib discover` (étape 1 : inventaire, paires, contrôle d'horloge),
 `download` (étape 2 : tous les fichiers bruts, avec manifeste et reprise), `bronze` (conversion en Parquet validé,
 suppression des bruts convertis), `silver` (étape 3 : un statut par mesure, agrégation horaire de chaque source),
 `pair` (appariement par segment de position, jointures, contrôle d'horloge, rapport d'entonnoir). Chaque commande
-accepte `--sample`.
+accepte `--sample`. `features` (étape 5) construit la couche gold : les heures utilisables, 48 variables sans
+référence ni futur (test anti-fuite), les plis de validation croisée par station et le modèle physique ajusté hors
+pli.
 
 Le nettoyage ne supprime aucune ligne : chaque mesure ou heure garde son statut (`ok` ou la première règle violée),
 et [`reports/funnel.md`](reports/funnel.md) compte ce que chaque règle retire. Uniquement des règles physiques et de

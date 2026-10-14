@@ -43,6 +43,7 @@ log = get_logger(__name__)
 PM_COLUMNS = ["sensor_id", "segment", "timestamp", "P1", "P2", pt.FLAG]
 # Statuses are stored as a fixed enumeration: a compact code, and an unknown status cannot be written.
 PM_FLAG_TYPE = pl.Enum([pt.OK, *pt.RULES])
+DELTA_COLUMNS = ("sensor_id", "segment", "timestamp")  # sorted: delta encoding halves the files
 SEGMENT_KEYS = ["sensor_id", "segment"]
 WORKERS = 4  # sensors processed in parallel (Polars itself is multi-threaded)
 
@@ -71,7 +72,9 @@ def clean_pm_sensor(settings: Settings, sensor_id: int, reference: pl.DataFrame)
     flagged = pt.flag_readings(readings, settings.particles, reference)
     dest = settings.paths.silver / "sensor_community" / "pm" / f"{sensor_id}.parquet"
     contracts.PmReadings.validate(flagged.select(PM_COLUMNS))
-    write_parquet_atomic(flagged.select(PM_COLUMNS).with_columns(pl.col(pt.FLAG).cast(PM_FLAG_TYPE)), dest)
+    write_parquet_atomic(
+        flagged.select(PM_COLUMNS).with_columns(pl.col(pt.FLAG).cast(PM_FLAG_TYPE)), dest, delta=DELTA_COLUMNS
+    )
     return pt.hourly_particles(flagged, settings.particles, SEGMENT_KEYS).collect()
 
 

@@ -221,9 +221,31 @@ class Evaluation(BaseModel):
 
 
 class Physics(BaseModel):
-    kappa: float
     density_ratio: float
-    rh_max_pct: float
+    kappa_bounds: tuple[float, float]
+    rh_cap_pct: float
+    fit_grid_points: int
+    fit_tolerance: float
+
+
+class Features(BaseModel):
+    log_floor_ugm3: float
+    local_timezone: str
+    rolling_hours: list[int]
+    missing_window_hours: list[int]
+    dew_point_a: float
+    dew_point_b: float
+    neighbour_radius_km: float
+    neighbour_min: int
+
+
+class CrossValidation(BaseModel):
+    n_folds: int
+
+
+class Health(BaseModel):
+    min_hours: int
+    change_corr_min: float
 
 
 class Sample(BaseModel):
@@ -257,6 +279,9 @@ class Settings(BaseSettings):
     meteo_france: MeteoFrance
     evaluation: Evaluation
     physics: Physics
+    features: Features
+    cv: CrossValidation
+    health: Health
     sample: Sample
 
     @classmethod

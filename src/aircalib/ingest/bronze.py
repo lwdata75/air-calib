@@ -13,6 +13,7 @@ import zlib
 from pathlib import Path
 
 import polars as pl
+import pyarrow.parquet as pq
 
 from aircalib.config import Settings
 from aircalib.ingest import dwd, eea, meteo_france
@@ -29,10 +30,25 @@ log = get_logger(__name__)
 COMPRESSION = "zstd"
 
 
-def write_parquet_atomic(frame: pl.DataFrame, dest: Path) -> int:
+def write_parquet_atomic(frame: pl.DataFrame, dest: Path, delta: tuple[str, ...] = ()) -> int:
+    """Write ``frame`` to ``dest`` through a temporary file (a crash never leaves half a file).
+
+    ``delta``: integer or timestamp columns stored with Parquet's delta encoding. For
+    sorted timestamps it is lossless and halves the file (the timestamp was half of
+    the silver readings' size); the other columns keep dictionary encoding.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
-    frame.write_parquet(tmp, compression=COMPRESSION)
+    if delta:
+        pq.write_table(
+            frame.to_arrow(),
+            tmp,
+            compression=COMPRESSION,
+            use_dictionary=[c for c in frame.columns if c not in delta],
+            column_encoding=dict.fromkeys(delta, "DELTA_BINARY_PACKED"),
+        )
+    else:
+        frame.write_parquet(tmp, compression=COMPRESSION)
     tmp.replace(dest)
     return dest.stat().st_size
 

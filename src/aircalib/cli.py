@@ -15,6 +15,7 @@ import polars as pl
 import typer
 
 from aircalib.config import Settings, get_settings
+from aircalib.gold import build as gold_stage
 from aircalib.ingest import bronze as bronze_stage
 from aircalib.ingest import discovery, plan, report
 from aircalib.ingest import download as download_stage
@@ -83,6 +84,12 @@ def pair(sample: SampleOpt = False) -> None:
     console.print(f"funnel: {silver_report.write(settings)}")
 
 
+@app.command()
+def features(sample: SampleOpt = False) -> None:
+    """Step 5: gold layer, usable pair-hours with features, station folds and the physical model."""
+    gold_stage.build(_settings(sample))
+
+
 @app.command(name="all")
 def run_all(sample: SampleOpt = False) -> None:
     """Run every implemented stage in order."""
@@ -91,6 +98,7 @@ def run_all(sample: SampleOpt = False) -> None:
     bronze(sample=sample)
     silver(sample=sample)
     pair(sample=sample)
+    features(sample=sample)
 
 
 @app.command()

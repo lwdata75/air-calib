@@ -1,6 +1,6 @@
 # Rapport d'entonnoir — mode complet
 
-_Généré automatiquement le 2026-10-14 12:39 UTC à partir des statuts de la couche silver (aucune ligne supprimée : chaque mesure ou heure garde sa raison)._
+_Généré automatiquement le 2026-10-14 13:07 UTC à partir des statuts de la couche silver (aucune ligne supprimée : chaque mesure ou heure garde sa raison)._
 
 ## 1. Mesures SDS011 (une ligne = une mesure brute)
 
@@ -159,4 +159,4 @@ Stations en décalage (toutes leurs paires sont exclues) :
 | couche | go |
 |---|---|
 | bronze | 5.317 |
-| silver | 4.165 |
+| silver | 2.740 |

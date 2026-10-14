@@ -84,6 +84,11 @@ Silver : `silver/sensor_community/{pm/<id>.parquet, pm_hourly, segments, humidit
 - Bruts EEA supprimés après bronze (`eea.keep_raw: false`) ; la découverte relit sa disponibilité en cache.
 - Sans correction : 19,9 % des paires DE passent les cibles EPA en horaire, 32,3 % en journalier ; erreur
   multiplicative (rapport ≈ 0,5–0,6) dépendant surtout de l'humidité ; paires « invérifiables » ≈ capteurs défectueux.
+- Modèle physique : PM_réf ≈ a·PM_brut/C(HR) (gain + κ, HR officielle plafonnée à 95 %), a = 2,39, κ = 0,066, ajusté
+  hors pli sur la zone d'entraînement (DE, ≤ 1,5 km, paires saines) ; κ-Köhler seul aggraverait (le capteur sous-estime).
+- Gold : `data/gold/{pair_hours,pairs,physics_fits}.parquet` ; 48 variables (`schemas/gold.FEATURES`), plis par station
+  (`fold`, France = null) ; log avec plancher 1 µg/m³ ; Duan seulement pour un modèle à pente libre (pente log ≈ 0,47).
+- Chaque chiffre clé de l'étape 6 : « paires saines » ET « toutes paires ».
 
 ## Convention horaire du projet
 Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

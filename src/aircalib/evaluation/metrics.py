@@ -101,3 +101,19 @@ def error_profile(frame: pl.DataFrame | pl.LazyFrame, by: list[str]) -> pl.DataF
         .sort(by)
         .collect()
     )
+
+
+def duan_smearing(log_residuals: pl.Series) -> float:
+    """Duan's smearing factor ``mean(exp(residual))`` for a model fitted on ``ln`` values.
+
+    ``exp(prediction)`` estimates the *median* of the target, not its mean: when the
+    errors are spread in log space, it under-estimates the mean (``E[exp(e)] > 1``).
+    Multiplying by this factor, computed on the **training** residuals, removes that
+    bias without assuming normal errors (Duan, 1983).
+    """
+    return float(log_residuals.drop_nulls().exp().mean())
+
+
+def back_transform(log_prediction: pl.Expr, smearing: float) -> pl.Expr:
+    """Prediction in ug/m3 from a log-scale prediction (EPA metrics are always computed in ug/m3)."""
+    return log_prediction.exp() * smearing

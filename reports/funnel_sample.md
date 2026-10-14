@@ -1,6 +1,6 @@
 # Rapport d'entonnoir — mode échantillon (`--sample`)
 
-_Généré automatiquement le 2026-10-14 12:49 UTC à partir des statuts de la couche silver (aucune ligne supprimée : chaque mesure ou heure garde sa raison)._
+_Généré automatiquement le 2026-10-14 13:14 UTC à partir des statuts de la couche silver (aucune ligne supprimée : chaque mesure ou heure garde sa raison)._
 
 ## 1. Mesures SDS011 (une ligne = une mesure brute)
 
@@ -134,4 +134,4 @@ _(rien)_
 | couche | go |
 |---|---|
 | bronze | 0.005 |
-| silver | 0.004 |
+| silver | 0.003 |

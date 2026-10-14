@@ -8,8 +8,8 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 | 1 | Exploration des sources et faisabilité (GO / NO-GO) | ✅ terminé (GO) | `ingest/{http,sensor_community,eea,discovery}.py`, `transform/{pairing,hourly}.py`, `notebooks/01_sources_et_faisabilite.ipynb`, `python -m aircalib discover` |
 | 2 | Ingestion à l'échelle (bronze) | ✅ terminé | `ingest/{plan,download,bronze,manifest,report,dwd,meteo_france}.py`, `schemas/bronze.py`, `transform/{physics,humidity,positions}.py`, `notebooks/02_ingestion_bronze.ipynb`, `reports/ingestion.md` |
 | 3 | Nettoyage (silver) | ✅ terminé | `transform/{particles,runs,reference,weather,clock,funnel}.py`, `silver/{sources,pairs,rules,report}.py`, `schemas/silver.py`, `notebooks/03_nettoyage_silver.ipynb`, `reports/funnel.md`, `python -m aircalib silver` puis `pair` |
-| 4 | Exploration des heures-paires | ✅ terminé — en attente de feu vert | `evaluation/metrics.py` (régression, cibles EPA, profils d'erreur), `notebooks/04_exploration_paires.ipynb` |
-| 5 | Feature engineering (couche gold) | ⏳ à faire | table gold (heures-paires `ok` + variables), familles de features documentées, κ-Köhler ajusté, notebook 05 |
+| 4 | Exploration des heures-paires | ✅ terminé | `evaluation/metrics.py` (régression, cibles EPA, profils d'erreur), `notebooks/04_exploration_paires.ipynb` |
+| 5 | Feature engineering (couche gold) | ✅ terminé — en attente de feu vert | `gold/build.py`, `transform/{physics,features,neighbours}.py`, `evaluation/{folds,metrics}.py`, `schemas/gold.py`, `notebooks/05_features_gold.ipynb`, `python -m aircalib features` |
 | 6 | Modélisation + MLflow | ⏳ à faire | échelle de modèles, GroupKFold par station, test 2025, ablation, Optuna, notebooks 10–11 |
 | 7 | Évaluation finale, transfert, conclusions | ⏳ à faire | cibles EPA, transfert DE → FR, erreur vs distance, notebook 12 |
 | 8 | Finition | ⏳ à faire | README final, `make sample` depuis un clone propre, requirements, lint/tests au vert |
@@ -36,6 +36,22 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 - **Un statut par mesure** (`quality_flag`), entonnoir calculé à partir des statuts.
 - **Découpage** : une station n'est jamais à la fois en entraînement et en test, quelle que soit la distance
   (`cv_group`).
+
+## Décisions du feu vert de l'étape 5 (14/10/2026)
+- **Paires invérifiables exclues de l'entraînement**, évaluées à part ; chaque chiffre clé donné pour les « paires
+  saines » et « toutes paires ».
+- **Couche gold** : uniquement les heures utilisables et les variables retenues.
+- **Modèle physique à deux paramètres** (gain $a$ et κ, ajustés ensemble sur l'entraînement, hors pli) ; humidité
+  officielle plafonnée (`physics.rh_cap_pct`).
+- **Échelle log préparée** (plancher `features.log_floor_ugm3`) ; correction de Duan dans `evaluation/metrics.py` ;
+  décision log / linéaire à l'étape 6 ; métriques EPA en µg/m³.
+
+## Détail de l'étape 5 (fait)
+1. Plis par station (GroupKFold glouton, 5 plis de 47–48 stations allemandes ; la France hors plis).
+2. Modèle physique : $a = 2{,}39$, $\kappa = 0{,}066$ (stables d'un pli à l'autre), estimation hors pli.
+3. 48 variables en 9 familles (capteur brut, météo officielle, sonde locale, physique, temps, dynamique passée,
+   capteur, contexte, voisinage citoyen) ; test anti-fuite.
+4. Couche gold : 13,82 M heures-paires, 1,1 Go ; score de santé par les voisins (AUC 0,90).
 
 ## Décisions du feu vert de l'étape 4 (14/10/2026)
 - Contrôle d'horloge sur les variations horaires (z de Fisher, contre-épreuve) adopté et mis en avant dans le README.
@@ -116,4 +132,10 @@ FR far 0,68 M ; 64 paires exclues par l'horloge (dont 5 stations TEOM au temps d
   - test de sensibilité à X (0,1 / 0,3 / 0,5), test avec et sans les paires invérifiables ;
   - échelle log contre µg/m³ (erreur multiplicative, notebook 04), sur les mêmes plis ;
   - erreur sur 2025 d'un modèle appris sur 2024 (dérive) ;
-  - résultats par type de station et par méthode de mesure.
+  - résultats par type de station et par méthode de mesure ;
+  - **chaque chiffre clé deux fois** : « paires saines » et « toutes paires » (les invérifiables, exclues de
+    l'entraînement, sont repérées grâce à la station) ;
+  - modèle physique hors pli comme variable et comme modèle de référence simple ; facteur de Duan calculé sur les
+    résidus d'entraînement de chaque pli et vérifié hors pli ;
+  - la pente en log (0,47) montre une régression vers la moyenne : comparer un modèle à pente libre au modèle
+    physique à pente 1.

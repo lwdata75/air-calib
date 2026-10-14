@@ -358,3 +358,47 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : capteurs défectueux (optique sale, ventilateur, électronique) dont les valeurs restent dans la plage du SDS011 ; le contrôle d'horloge, qui teste si les variations suivent la station, les détecte.
 - **Contournement** : gardées avec leur drapeau (décision du commanditaire) ; **recommandation** : les exclure de l'entraînement et les évaluer à part ; test avec et sans elles à l'étape 6.
 - **Impact** : avec elles, le « avant » perd 4 à 6 points (DE horaire 19,9 % contre 23,7 %).
+
+## Étape 5 — Variables du modèle (couche gold)
+
+### [2026-10-14] Décision : paires invérifiables exclues de l'entraînement, chaque chiffre clé donné deux fois
+- **Constat** : les 301 paires « invérifiables » (2,32 M heures utilisables) sont, pour l'essentiel, des capteurs défectueux (R² médian 0,03).
+- **Pourquoi** : elles sont repérées grâce à la station de référence, qui n'existe pas en service ; les exclure du test rendrait les résultats un peu optimistes.
+- **Contournement** : `sane_pair` (horloge vérifiée ou retard d'instrument) ; la zone d'entraînement = Allemagne, ≤ 1,5 km, paires saines (4,67 M heures, 459 paires). Les paires non saines restent dans gold pour être évaluées à part. 2 paires (14 heures) n'avaient jamais pu passer le contrôle d'horloge : elles comptent comme non saines.
+- **Impact** : à partir de l'étape 6, chaque chiffre clé est donné pour les « paires saines » **et** pour « toutes les paires ».
+
+### [2026-10-14] Changement du modèle physique : un gain et une hygroscopicité, ajustés ensemble
+- **Constat** : le capteur brut **sous-estime** la référence (rapport 0,42 en air sec, 0,79 en air saturé). La correction κ-Köhler seule divise la mesure par $C(\mathrm{HR}) \ge 1$ : elle aggraverait l'écart.
+- **Pourquoi** : κ-Köhler suppose un capteur exact en air sec ; le SDS011 ne voit qu'environ 42 % de la masse de la référence (hypothèse : il rate les plus fines particules, alors que la référence sèche et pèse l'échantillon).
+- **Contournement** : $\mathrm{PM}_{\text{réf}} \approx a\,\mathrm{PM}_{\text{brut}}/C(\mathrm{HR})$, soit $\ln \mathrm{PM}_{\text{réf}} = \ln a + \ln \mathrm{PM}_{\text{brut}} - \ln C$ ; pour chaque κ le meilleur $\ln a$ est une moyenne, κ est cherché sur une grille puis par section dorée (`transform/physics.py`, test qui retrouve $a$ et κ connus). Ajusté **sur l'entraînement uniquement**, une fois par pli (sans la station testée) et une fois sur toute la zone (pour la France) ; l'estimation est donc **hors pli**.
+- **Impact** : $a$ = 2,34–2,47 et κ = 0,064–0,068 selon les plis (zone entière : 2,39 et 0,066). $1/a = 0{,}42$ = le rapport observé en air sec : plausible. κ est bas pour un aérosol continental (0,1–0,4, Petters & Kreidenweis 2007) : c'est un κ **effectif** (hypothèses : le capteur chauffe l'air aspiré, l'humidité vient d'une station à ~6 km, la réponse optique ne suit pas toute la croissance). Après correction, le rapport médian passe de 0,41–0,79 à 0,96–1,15 ; la forme de Köhler (plate puis brutale) sous-estime l'effet entre 80 et 95 %. L'humidité n'améliore l'erreur en log que de 6 % : l'essentiel de l'erreur reste à apprendre.
+
+### [2026-10-14] L'humidité officielle est plafonnée à 95 % dans le modèle physique
+- **Constat** : avec l'humidité officielle, 100 % est réel (brouillard), mais $C$ diverge vers 100 %. Le κ ajusté dépend du plafond : 0,126 (90 %), 0,066 (95 %), 0,044 (97 %), 0,021 (99 %), pour une erreur en log de 0,4847, 0,4855, 0,4885, 0,4969.
+- **Pourquoi** : les hygromètres officiels ont ±2–3 % d'incertitude près de la saturation, et au-delà de ~95 % la loi de Köhler prédit une croissance que les données ne montrent pas.
+- **Contournement** : HR plafonnée à `physics.rh_cap_pct` = 95 % (au lieu de l'ancienne règle « jamais au-dessus de 95 % » de l'étape 2, qui laissait la correction vide). L'humidité **saturée d'une sonde** reste, elle, manquante en amont. Test : à 99,99 % et 100 %, $C$ vaut $C(95\ \%)$, fini.
+- **Impact** : les heures de brouillard gardent une correction physique ; le choix du plafond est documenté avec sa sensibilité.
+
+### [2026-10-14] Échelle log : plancher de 1 µg/m³, et la correction de Duan n'est valable que pour un modèle à pente libre
+- **Constat** : 12,4 % des heures du capteur et 0,6 % des heures de référence sont sous 1 µg/m³ dans la zone d'entraînement. Sur le modèle physique seul (pente fixée à 1 en log), la correction de Duan (facteur 1,50) **aggrave** la moyenne retransformée (9,4 réel ; 11,8 sans correction ; 17,7 avec). Sur un modèle log-linéaire à pente libre appris hors pli, la pente vaut **0,47** et Duan ramène la moyenne de 8,2 à 9,6 µg/m³ (référence 9,4).
+- **Pourquoi** : sous 1 µg/m³ la référence est au niveau de son bruit ; Duan suppose des résidus indépendants des variables, faux quand la pente est imposée à 1. La pente de 0,47 traduit une forte « régression vers la moyenne » : quand le capteur lit haut, une partie de l'écart est du bruit.
+- **Contournement** : `features.log_floor_ugm3 = 1.0` (`log_reference`, `log_pm25`, `log_physics_pm25`) ; `evaluation.metrics.duan_smearing` et `back_transform` prêts, testés (sur des données log-normales, la moyenne est retrouvée à 1 % près) ; à l'étape 6, le facteur sera calculé sur les résidus d'entraînement du modèle final, pli par pli, et vérifié sur les moyennes hors pli. Les métriques EPA restent en µg/m³.
+- **Impact** : un modèle qui garde la pente 1 de la physique ne pourra pas corriger le bruit du capteur ; c'est un argument pour le modèle appris.
+
+### [2026-10-14] 48 variables en 9 familles, sans référence ni futur
+- **Constat** : la variable la plus liée à l'erreur à corriger ($\ln$ réf − $\ln$ brut) est l'**écart aux voisins citoyens** (Spearman −0,65), devant le niveau du capteur (−0,64), ses moyennes glissantes (≈ −0,6), l'humidité (−0,31) et $T - T_d$ (+0,31). La distance capteur–station, la distance à la station météo et les taux de manques n'y sont presque pas liés (|ρ| ≤ 0,02).
+- **Pourquoi** : un capteur qui lit plus haut que ses voisins se trompe vers le haut ; le reste confirme le notebook 04.
+- **Contournement** : familles documentées dans `schemas/gold.py` (`FEATURES`) et le notebook 05 ; temps en heure **locale** (Europe/Paris, commune à l'Allemagne et la France) encodé en sinus/cosinus ; point de rosée par la formule de Magnus ; fenêtres glissantes $(h-w, h]$ et taux de manques sur $[h-w, h)$, **jamais une heure future** : test `test_no_feature_uses_the_future` (on rend absurdes les valeurs après $t$, les variables jusqu'à $t$ ne bougent pas) et vérification sur une vraie paire de 17 177 heures dans le notebook. Voisins : autres capteurs à ≤ 3 km, au moins 3 valides à l'heure (79 % des heures d'entraînement). Les scores de santé, calculés sur toute la période, ne sont **pas** des variables horaires (ils regarderaient le futur).
+- **Impact** : limite : les voisins sont seulement les capteurs téléchargés pour ce projet (le vrai réseau en compte davantage) ; la sonde locale n'est renseignée que pour 25 % des heures.
+
+### [2026-10-14] Bonus : la santé d'un capteur se lit sur ses voisins, sans station
+- **Constat** : sur 999 paires ayant assez d'heures avec au moins 3 voisins (156 invérifiables), la corrélation des variations horaires du capteur avec la médiane de ses voisins sépare les invérifiables des saines avec une AUC de **0,90** (0,91 pour les niveaux). Au seuil 0,1 (par analogie avec le contrôle d'horloge) : 69 paires signalées, 58 vraies invérifiables, **précision 84 %, rappel 37 %** ; au seuil 0,2 : précision 73 %, rappel 56 %.
+- **Pourquoi** : un capteur en panne ne suit plus les variations de l'air que ses voisins, eux, suivent.
+- **Contournement** : `transform/neighbours.health_scores`, `health.change_corr_min = 0.1` ; résultats par paire dans `gold/pairs.parquet`.
+- **Impact** : **argument produit** : un réseau peut signaler ses capteurs suspects sans station officielle. Limites : 432 paires sans assez de voisins, seuil non validé sur des données séparées.
+
+### [2026-10-14] Disque et mémoire : encodage delta, Float32, calcul des voisins mois par mois
+- **Constat** : avec la couche gold (1,1 Go), `data/` atteignait 10,5 Go. Le premier calcul des voisins a été tué faute de mémoire (code 137) : la jointure heure × voisins fait ~10⁸ lignes, avec des identifiants texte.
+- **Pourquoi** : l'horodatage représentait la moitié des mesures silver ; la jointure tenait entière en mémoire.
+- **Contournement** : mesures silver écrites avec l'**encodage delta** de Parquet pour les colonnes triées (`sensor_id`, `segment`, `timestamp`), sans perte (relecture identique vérifiée) : 2,76 → 1,37 Go ; il n'aide pas la couche gold (essayé, +3 %), qui stocke ses nombres décimaux en Float32. Voisins : identifiants entiers et calcul mois par mois (pic mémoire 30 Go sur 48, 39 s pour toute l'étape).
+- **Impact** : `data/` = **9,1 Go** (bronze 5,0, silver 2,7, gold 1,1), sous le plafond de 10 Go.

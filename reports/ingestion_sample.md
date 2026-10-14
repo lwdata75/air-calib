@@ -1,6 +1,6 @@
 # Rapport d'ingestion — mode échantillon (`--sample`)
 
-_Généré automatiquement le 2026-10-14 12:49 UTC à partir des manifestes._
+_Généré automatiquement le 2026-10-14 13:14 UTC à partir des manifestes._
 
 ## Sensor.Community (unités = capteur × mois)
 
