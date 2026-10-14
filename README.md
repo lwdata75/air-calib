@@ -8,10 +8,11 @@
 Clients visés : une collectivité qui veut un réseau de mesure dense à bas coût, un promoteur
 immobilier, un assureur santé.
 
-**Statut :** étape 5 (variables, couche gold) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
+**Statut :** étape 6 (modèles) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
 [`01`](notebooks/01_sources_et_faisabilite.ipynb), [`02`](notebooks/02_ingestion_bronze.ipynb),
-[`03`](notebooks/03_nettoyage_silver.ipynb), [`04`](notebooks/04_exploration_paires.ipynb) et
-[`05`](notebooks/05_features_gold.ipynb), et le rapport d'entonnoir [`reports/funnel.md`](reports/funnel.md). Ce README sera complété au fil des étapes.
+[`03`](notebooks/03_nettoyage_silver.ipynb), [`04`](notebooks/04_exploration_paires.ipynb),
+[`05`](notebooks/05_features_gold.ipynb) et [`06`](notebooks/06_modeles.ipynb), et le rapport d'entonnoir
+[`reports/funnel.md`](reports/funnel.md). Ce README sera complété au fil des étapes.
 
 ## Le point de départ : un capteur à 30 € sans correction
 
@@ -48,6 +49,41 @@ $$
 avec $a = 2{,}39$ (le capteur voit 1/2,39 = 42 % de la référence en air sec) et $\kappa = 0{,}066$, un κ « effectif »
 plus bas que l'hygroscopicité habituelle de l'aérosol, l'humidité officielle étant plafonnée à 95 %. La correction
 κ-Köhler seule, qui divise la mesure, aurait aggravé l'écart. Détails : notebook 05.
+
+## Après correction : 80 % des paires dans les cibles EPA, mais seulement 42 % quand le capteur est isolé
+
+Le modèle retenu est un **LightGBM** (arbres de décision construits les uns après les autres, chacun corrigeant les
+erreurs des précédents). Il prend 45 variables : mesure brute, humidité et température **officielles**, modèle
+physique, heure et saison, dynamique des heures passées, capteur, contexte, et **médiane des capteurs citoyens
+voisins**. Une contrainte garantit qu'une lecture brute plus haute ne fait jamais baisser la valeur corrigée.
+
+Il est évalué par **validation croisée par station** : 5 plis, et une station de test n'est jamais vue à
+l'entraînement. Le tableau porte sur l'Allemagne, à ≤ 1,5 km, en 2024–2025 :
+
+| | RMSE horaire | % paires EPA, horaire | % paires EPA, journalier |
+|---|---|---|---|
+| Capteur brut (paires saines) | 11,0 µg/m³ | 24,8 % | 39,1 % |
+| **Modèle, paires saines, toutes heures** | **3,84 µg/m³** | **79,7 %** | **85,3 %** |
+| … heures avec ≥ 3 voisins citoyens (79 %) | 3,39 µg/m³ | 88,3 % | 92,0 % |
+| … heures **sans** voisins (21 %) | 5,21 µg/m³ | 42,1 % | 58,6 % |
+| Modèle, toutes paires (capteurs abîmés compris) | 4,38 µg/m³ | 74,7 % | 81,9 % |
+| … avec voisins / sans voisins | 3,54 / 6,59 µg/m³ | 84,3 / 36,4 % | 90,2 / 49,6 % |
+
+- **La performance vient des données et des variables, pas du réglage du modèle.** Le réglage automatique des
+  hyperparamètres (Optuna) ne rapporte que ≈ 2 % de RMSE. Retirer les voisins citoyens coûte 21 % ; retirer la
+  dynamique passée, 4 %. Passer d'une régression linéaire à LightGBM avec toutes les variables fait passer les paires
+  EPA de 12 % à 77 %.
+- **Limite principale** : une heure sur cinq n'a pas de voisins citoyens. Le RMSE monte alors à 5,2 µg/m³ (contre
+  3,4 avec voisins) et moins de la moitié des paires passent les cibles EPA en horaire. La qualité de la correction
+  dépend de la **densité du réseau**.
+- **La pente EPA d'un modèle de régression suit son $R^2$** (ici 0,82 pour 0,76) : un modèle qui minimise l'erreur
+  quadratique resserre ses prédictions vers la moyenne. Recalibrer la pente à 1 a été testé et rejeté, car le RMSE
+  augmentait de 19 %.
+- Le chiffre est **légèrement optimiste** : les hyperparamètres ont été choisis sur les mêmes plis. Avec les réglages
+  par défaut, RMSE 3,91 et 77,3 % / 85,3 %. Le test sur 2025 et le transfert vers la France (étape 7) diront s'il
+  tient.
+- **Rejetés, avec chiffres** : modèle hybride (pas robuste aux capteurs abîmés), intervalle 10–90 % des quantiles (ne
+  couvre que 62 %), sonde d'humidité du capteur (n'apporte rien). Détails : notebook 06 et journal.
 
 ## Un exemple de rigueur : l'horloge des stations, vérifiée et pas supposée, sur toutes les paires
 
@@ -105,7 +141,9 @@ d'humidité du capteur fonctionne** : la station météo publique la plus proche
 Un capteur qui ne suit plus l'air ne suit plus ses voisins. La corrélation des variations horaires d'un capteur avec
 la médiane des capteurs citoyens à moins de 3 km, calculée **sans aucune donnée de station**, retrouve les capteurs
 défectueux repérés par la station avec une **AUC de 0,90** (au seuil 0,1 : précision 84 %, rappel 37 %). Un réseau
-de capteurs peut donc signaler lui-même ses capteurs suspects. Détails : notebook 05, section 6.
+de capteurs peut donc signaler lui-même ses capteurs suspects. Validé sur des stations jamais vues (notebook 06) :
+65 % des signalements sont justes et 56 % des capteurs abîmés sont repérés. Le transfert vers la France reste faible
+(précision 50 %, rappel 25 %, sur 50 paires). Détails : notebook 05, section 6, et notebook 06, section 11.
 
 ## Données (100 % open data, coût 0 €)
 
@@ -136,6 +174,8 @@ make test      # tests unitaires hors-ligne
 make lint      # ruff
 make sample    # tout le pipeline sur 10 capteurs par pays et un mois (≈ 1 min)
 make data      # volume complet (≈ 3 h de téléchargement, 13 min de bronze, 4 min de silver et gold ; ≈ 9,1 Go)
+make train     # étape 6 : échelle de modèles, études annexes, modèle final (≈ 1 h 30, suivi MLflow)
+make mlflow    # interface MLflow locale (sqlite:///mlflow.db)
 ```
 
 Commandes détaillées : `python -m aircalib discover` (étape 1 : inventaire, paires, contrôle d'horloge),
@@ -144,7 +184,9 @@ suppression des bruts convertis), `silver` (étape 3 : un statut par mesure, agr
 `pair` (appariement par segment de position, jointures, contrôle d'horloge, rapport d'entonnoir). Chaque commande
 accepte `--sample`. `features` (étape 5) construit la couche gold : les heures utilisables, 48 variables sans
 référence ni futur (test anti-fuite), les plis de validation croisée par station et le modèle physique ajusté hors
-pli.
+pli. `train --study <étude>` (étape 6) entraîne et évalue un modèle ou une étude (`ladder`, `ablation`, `scale`,
+`monotone`, `unverifiable`, `x`, `optuna`, `recalibration`, `final`) et enregistre tout dans MLflow : paramètres,
+liste des variables, empreinte de la table gold, métriques par pli et prédictions hors pli.
 
 Le nettoyage ne supprime aucune ligne : chaque mesure ou heure garde son statut (`ok` ou la première règle violée),
 et [`reports/funnel.md`](reports/funnel.md) compte ce que chaque règle retire. Uniquement des règles physiques et de

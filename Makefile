@@ -1,4 +1,4 @@
-.PHONY: help setup requirements data sample test lint format notebooks mlflow clean
+.PHONY: help setup requirements data sample train test lint format notebooks mlflow clean
 
 RUN := uv run
 
@@ -17,6 +17,11 @@ data:  ## Run every implemented pipeline stage on the full period
 sample:  ## Fast end-to-end run on a small subset
 	$(RUN) python -m aircalib all --sample
 
+train:  ## Step 6: model ladder, side studies on the subsample, final model (MLflow, about 1 h 30)
+	for study in ladder ablation scale monotone unverifiable x optuna recalibration final; do \
+		$(RUN) python -m aircalib train --study $$study || exit 1; \
+	done
+
 test:  ## Unit tests (offline)
 	$(RUN) pytest -m "not network"
 
@@ -31,7 +36,7 @@ format:  ## Auto-fix lint and format
 notebooks:  ## Re-execute every notebook in place
 	$(RUN) jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
 
-mlflow:  ## Local MLflow UI (available from step 6)
+mlflow:  ## Local MLflow UI (runs of step 6)
 	$(RUN) mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 clean:  ## Remove caches (keeps data/)

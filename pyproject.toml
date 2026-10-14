@@ -10,13 +10,17 @@ dependencies = [
     "duckdb>=1.5.6",
     "httpx>=0.28.1",
     "jupyter>=1.1.1",
+    "lightgbm>=4.7.0",
     "matplotlib>=3.11.2",
+    "mlflow>=3",
+    "optuna>=5.0.0",
     "pandera[polars]>=0.34.1",
     "polars>=2.0.0",
-    "pyarrow>=26.0.0",
+    "pyarrow>=21.0.0",
     "pydantic-settings>=2.15.0",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
+    "scikit-learn>=1.9.1",
     "typer>=0.27.3",
 ]
 

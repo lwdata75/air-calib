@@ -34,6 +34,7 @@ def regression_metrics(frame: pl.DataFrame | pl.LazyFrame, by: list[str]) -> pl.
             intercept=y.mean() - slope * x.mean(),
             r2=pl.corr(x, y) ** 2,
             rmse=((y - x) ** 2).mean().sqrt(),
+            mae=(y - x).abs().mean(),
             bias=(y - x).mean(),
         )
         .with_columns(nrmse=pl.col("rmse") / pl.col("mean_reference"))

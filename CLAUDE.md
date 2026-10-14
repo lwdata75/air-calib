@@ -88,7 +88,11 @@ Silver : `silver/sensor_community/{pm/<id>.parquet, pm_hourly, segments, humidit
   hors pli sur la zone d'entraînement (DE, ≤ 1,5 km, paires saines) ; κ-Köhler seul aggraverait (le capteur sous-estime).
 - Gold : `data/gold/{pair_hours,pairs,physics_fits}.parquet` ; 48 variables (`schemas/gold.FEATURES`), plis par station
   (`fold`, France = null) ; log avec plancher 1 µg/m³ ; Duan seulement pour un modèle à pente libre (pente log ≈ 0,47).
-- Chaque chiffre clé de l'étape 6 : « paires saines » ET « toutes paires ».
+- Chaque chiffre clé de l'étape 6 : « paires saines » ET « toutes paires », et « avec / sans voisins ».
+- Étape 6 : `python -m aircalib train --study <étude>` (MLflow, `mlruns/` gitignoré) ; macOS : `ensure_openmp()` relance
+  le processus avec le `libomp` de scikit-learn. Modèle retenu : LightGBM en µg/m³, 45 variables (sans sonde locale),
+  monotone, réglages Optuna (essai 14 sur 15) ; RMSE 3,84, 79,7 % / 85,3 % de paires EPA (saines) ; sans voisins
+  (21 % des heures) RMSE 5,21 et 42 % : limite principale. Optuna ≈ 2 % ; voisinage ≈ 21 %. Pente EPA ≈ R².
 
 ## Convention horaire du projet
 Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

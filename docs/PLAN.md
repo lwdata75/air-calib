@@ -9,9 +9,9 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 | 2 | Ingestion à l'échelle (bronze) | ✅ terminé | `ingest/{plan,download,bronze,manifest,report,dwd,meteo_france}.py`, `schemas/bronze.py`, `transform/{physics,humidity,positions}.py`, `notebooks/02_ingestion_bronze.ipynb`, `reports/ingestion.md` |
 | 3 | Nettoyage (silver) | ✅ terminé | `transform/{particles,runs,reference,weather,clock,funnel}.py`, `silver/{sources,pairs,rules,report}.py`, `schemas/silver.py`, `notebooks/03_nettoyage_silver.ipynb`, `reports/funnel.md`, `python -m aircalib silver` puis `pair` |
 | 4 | Exploration des heures-paires | ✅ terminé | `evaluation/metrics.py` (régression, cibles EPA, profils d'erreur), `notebooks/04_exploration_paires.ipynb` |
-| 5 | Feature engineering (couche gold) | ✅ terminé — en attente de feu vert | `gold/build.py`, `transform/{physics,features,neighbours}.py`, `evaluation/{folds,metrics}.py`, `schemas/gold.py`, `notebooks/05_features_gold.ipynb`, `python -m aircalib features` |
-| 6 | Modélisation + MLflow | ⏳ à faire | échelle de modèles, GroupKFold par station, test 2025, ablation, Optuna, notebooks 10–11 |
-| 7 | Évaluation finale, transfert, conclusions | ⏳ à faire | cibles EPA, transfert DE → FR, erreur vs distance, notebook 12 |
+| 5 | Feature engineering (couche gold) | ✅ terminé | `gold/build.py`, `transform/{physics,features,neighbours}.py`, `evaluation/{folds,metrics}.py`, `schemas/gold.py`, `notebooks/05_features_gold.ipynb`, `python -m aircalib features` |
+| 6 | Modélisation + MLflow | ✅ terminé — en attente de feu vert | `models/{data,ladder,cv,tracking,studies,results,runtime}.py`, `evaluation/{scoring,health}.py`, `notebooks/06_modeles.ipynb`, `python -m aircalib train --study <étude>`, `make train` |
+| 7 | Évaluation finale, transfert, conclusions | ⏳ à faire | test 2024 → 2025, transfert DE → FR, erreur selon la distance, notebook 07 |
 | 8 | Finition | ⏳ à faire | README final, `make sample` depuis un clone propre, requirements, lint/tests au vert |
 
 ## Décisions prises (feu vert du 14/10/2026)
@@ -36,6 +36,35 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 - **Un statut par mesure** (`quality_flag`), entonnoir calculé à partir des statuts.
 - **Découpage** : une station n'est jamais à la fois en entraînement et en test, quelle que soit la distance
   (`cv_group`).
+
+## Détail de l'étape 6 (fait)
+1. MLflow local (`sqlite:///mlflow.db`) : un run par modèle ou variante, avec paramètres, variables, empreinte gold,
+   métriques par pli et regroupées (horaire et journalier, µg/m³, paires saines et toutes paires, avec et sans
+   voisins), prédictions hors pli et figures.
+2. Échelle de modèles sur les 5 plis par station, volume complet : brut → linéaire en log → physique → LightGBM →
+   hybride → quantiles. LightGBM : RMSE 3,95, 76,7 % / 85,6 % de paires EPA (paires saines).
+3. Études annexes sur 20 % des paires (graine 42) :
+   - ablation par famille (le voisinage décide : +21 % de RMSE sans lui) ;
+   - log contre µg/m³ (µg retenu) ;
+   - contrainte monotone (gardée) ;
+   - invérifiables à l'entraînement (léger gain, non retenu) ;
+   - X = 0,1 / 0,3 / 0,5 (négligeable) ;
+   - recalibration de la pente (rejetée) ;
+   - Optuna (15 essais, −2 %).
+4. Modèle retenu, réentraîné sur le volume complet : LightGBM en µg/m³, 45 variables (sans la sonde locale),
+   monotone, réglages Optuna. RMSE 3,84 µg/m³, 79,7 % / 85,3 % de paires EPA (saines) ; avec voisins 3,39 et
+   88,3 % / 92,0 % ; sans voisins 5,21 et 42,1 % / 58,6 %.
+5. Score de santé : seuil choisi sur 4 plis et mesuré sur le 5ᵉ (précision 65 %, rappel 56 %) ; transfert vers la
+   France faible (50 % / 25 %).
+
+## Engagements pour l'étape 7 (issus de l'étape 6)
+- Test 2024 → 2025 (dérive) ; test « distance » par station (bandes ≤ 1,5 km et 1,5–3 km) ; transfert vers la France
+  sans recalibrer. Ces trois tests sont **hors sélection** des hyperparamètres.
+- Garder le découpage « avec / sans voisins » dans **tous** les tableaux finaux, y compris le % de paires EPA.
+- À mesurer : un modèle dédié aux heures sans voisins (gain attendu ≈ 0,1 µg/m³) ; un intervalle calibré par
+  station (conforme), l'intervalle quantile ne couvrant que 62 % au lieu de 80 % ; l'entraînement avec les paires
+  invérifiables (proposition) ; la cible log contre µg/m³ sur toutes paires (le µg/m³ y perd sur le volume complet).
+- Score de santé en France : comprendre la faiblesse du transfert (voisinage, effectif).
 
 ## Décisions du feu vert de l'étape 5 (14/10/2026)
 - **Paires invérifiables exclues de l'entraînement**, évaluées à part ; chaque chiffre clé donné pour les « paires

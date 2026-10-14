@@ -220,6 +220,37 @@ class Evaluation(BaseModel):
     level_bins: list[float]
 
 
+class FinalModel(BaseModel):
+    log_target: bool
+    residual_of: str
+    monotone: bool
+    recalibrate: bool
+    use_optuna: bool
+    drop_families: list[str]
+
+
+class SearchRange(BaseModel):
+    low: float
+    high: float
+    log: bool = False
+    integer: bool = False
+
+
+class Models(BaseModel):
+    tracking_uri: str
+    experiment: str
+    seed: int
+    subsample_pair_share: float
+    optuna_trials: int
+    optuna_space: dict[str, SearchRange]
+    linear_features: list[str]
+    monotone_features: list[str]
+    quantiles: list[float]
+    final: FinalModel
+    num_boost_round: int
+    lightgbm: dict[str, float | int | bool | str]
+
+
 class Physics(BaseModel):
     density_ratio: float
     kappa_bounds: tuple[float, float]
@@ -278,6 +309,7 @@ class Settings(BaseSettings):
     dwd: Dwd
     meteo_france: MeteoFrance
     evaluation: Evaluation
+    models: Models
     physics: Physics
     features: Features
     cv: CrossValidation

@@ -402,3 +402,151 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : l'horodatage représentait la moitié des mesures silver ; la jointure tenait entière en mémoire.
 - **Contournement** : mesures silver écrites avec l'**encodage delta** de Parquet pour les colonnes triées (`sensor_id`, `segment`, `timestamp`), sans perte (relecture identique vérifiée) : 2,76 → 1,37 Go ; il n'aide pas la couche gold (essayé, +3 %), qui stocke ses nombres décimaux en Float32. Voisins : identifiants entiers et calcul mois par mois (pic mémoire 30 Go sur 48, 39 s pour toute l'étape).
 - **Impact** : `data/` = **9,1 Go** (bronze 5,0, silver 2,7, gold 1,1), sous le plafond de 10 Go.
+
+## Étape 6 — Modélisation et suivi MLflow
+
+### [2026-10-14] LightGBM ne trouvait pas OpenMP sur macOS ; uv choisissait un vieux MLflow
+- **Constat** : `import lightgbm` échouait (`Library not loaded: @rpath/libomp.dylib`), Homebrew n'étant pas installé. Par ailleurs, `uv` résolvait **MLflow 1.27** (erreur `protobuf.service` à l'import) à cause de la contrainte `pyarrow>=26` du projet.
+- **Pourquoi** : la roue LightGBM pour macOS ne fournit pas OpenMP ; les MLflow récents imposent un pyarrow plus ancien que 26, donc le résolveur remontait jusqu'à une version de 2022.
+- **Contournement** : `models/runtime.ensure_openmp()` relance le processus une seule fois avec `DYLD_FALLBACK_LIBRARY_PATH` pointant vers le `libomp.dylib` livré avec scikit-learn (aucune installation système). Contrainte relâchée à `pyarrow>=21`, ce qui donne MLflow 3.17.1 ; `requirements.txt` régénéré.
+- **Impact** : `python -m aircalib train` fonctionne sur un Mac neuf sans Homebrew. Sous Linux, la fonction ne fait rien.
+
+### [2026-10-14] La pente EPA d'un modèle de régression vaut à peu près son R²
+- **Constat** : sur l'échelle de modèles, la pente EPA suit le $R^2$ : 0,48 pour 0,40 (linéaire en log), 0,81 pour 0,74 (LightGBM). Seul le modèle physique, qui n'est pas une régression, a une pente proche de 1 (1,11) avec un $R^2$ de 0,16.
+- **Pourquoi** : un modèle qui minimise l'erreur quadratique est calibré ($\mathbb{E}[y \mid \hat y] = \hat y$), donc $\operatorname{cov}(\hat y, y) = \operatorname{var}(\hat y)$ et la pente de $\hat y$ sur $y$ vaut $\operatorname{var}(\hat y)/\operatorname{var}(y) = R^2$ (démonstration dans le notebook 06, section 1). Il resserre ses prédictions vers la moyenne.
+- **Contournement** : pente et $R^2$ donnés côte à côte. Test d'une recalibration linéaire apprise hors pli (voir plus bas). Test `test_epa_slope_regresses_prediction_on_reference` pour la convention EPA ($\hat y$ régressé sur la référence).
+- **Impact** : avec $R^2 \approx 0{,}75$, la pente est autour de 0,8, déjà dans la cible EPA [0,65 ; 1,35]. Ce qui bloque les paires restantes, c'est le $R^2$.
+
+### [2026-10-14] Échelle de modèles : les échelons 1 et 2 ne battent pas le précédent sur tout
+- **Constat** (5 plis par station, volume complet, paires saines, horaire) :
+  - capteur brut : RMSE 11,0 µg/m³, 24,8 % de paires EPA ;
+  - linéaire en log : RMSE 6,0, mais 11,8 % de paires EPA ;
+  - physique : RMSE 19,5, 26,4 % de paires EPA ;
+  - LightGBM : RMSE 3,95, $R^2$ 0,74, 76,7 % de paires EPA en horaire, 85,6 % en journalier.
+- **Pourquoi** : le linéaire corrige le biais moyen mais resserre ses prédictions (pente 0,48), d'où moins de paires dans la cible de pente. La physique redresse le gain (pente 1,11) mais multiplie par $a \approx 2{,}4$ les pics parasites du capteur, d'où un RMSE qui explose.
+- **Contournement** : aucun ; ces échelons servent de références. La physique reste une **variable** du modèle appris.
+- **Impact** : le saut vient du modèle appris avec toutes les variables. Les échelons simples ne sont pas des produits.
+
+### [2026-10-14] Modèle hybride rejeté : pas robuste aux capteurs abîmés
+- **Constat** : LightGBM appris sur le résidu $\ln$ réf − $\ln$ physique fait jeu égal sur les paires saines (RMSE 4,00 contre 3,95 ; 78,0 % contre 76,7 % de paires EPA en horaire). Sur toutes paires, il s'effondre : RMSE 6,52 et $R^2$ 0,48, contre 4,30 et 0,70.
+- **Pourquoi** : la prédiction part de la physique, qui amplifie les pics d'un capteur défectueux ; le résidu appris ne sait pas l'annuler sur des capteurs jamais vus à l'entraînement.
+- **Contournement** : LightGBM direct retenu (`models.final.residual_of: ""`).
+- **Impact** : le produit doit rester correct sur un capteur que personne n'a encore déclaré défectueux.
+
+### [2026-10-14] L'intervalle 10–90 % des quantiles ne couvre que 62 %
+- **Constat** : la régression quantile (10 %, 50 %, 90 %) a une médiane aussi bonne que LightGBM (RMSE 3,95), mais la référence n'est dans l'intervalle 10–90 % que 62 % du temps (attendu : 80 %), pour une largeur médiane de 4 µg/m³.
+- **Pourquoi** : les quantiles sont appris sur les stations d'entraînement. Une station nouvelle a son propre biais, que l'intervalle ignore.
+- **Contournement** : l'intervalle n'est pas livré tel quel. Piste pour l'étape 7 : calibration conforme par station (élargir l'intervalle avec les résidus hors pli).
+- **Impact** : pas d'incertitude annoncée au client à ce stade (limite).
+
+### [2026-10-14] Cible en µg/m³ plutôt qu'en log
+- **Constat** : même LightGBM, mêmes plis, sous-échantillon : en µg/m³, RMSE 4,22 et 72,6 % / 84,4 % de paires EPA (horaire / journalier) ; en log avec la correction de Duan pli par pli, RMSE 4,30 et 70,5 % / 82,2 %. La pente est identique (0,79).
+- **Pourquoi** : le log optimise une erreur relative, alors que les cibles EPA sont absolues ; sur ce sous-échantillon, une paire vaut 1,05 point de « % EPA ».
+- **Contournement** : `models.final.log_target: false`. Duan reste dans le code pour le linéaire en log et l'échelon 3.
+- **Impact** : voir l'entrée « point de vigilance » : sur le volume complet, ce choix n'est pas gagnant pour les capteurs abîmés.
+
+### [2026-10-14] Contrainte monotone gardée, perte nulle
+- **Constat** : RMSE 4,29 avec la contrainte contre 4,30 sans ; paires EPA identiques en horaire (70,5 %), 83,3 % contre 82,2 % en journalier.
+- **Pourquoi** : la contrainte (méthode `advanced` de LightGBM, sur le PM brut, son log et la physique) n'interdit que des creux non physiques.
+- **Contournement** : `models.final.monotone: true`, variables dans `models.monotone_features`.
+- **Impact** : garantie défendable devant un client : à conditions égales, une lecture brute plus haute ne fait jamais baisser la valeur corrigée.
+
+### [2026-10-14] Recalibration de la pente rejetée
+- **Constat** : la recalibration apprise hors pli ($\hat y' = (\hat y - b)/s$, $s$ et $b$ estimés par une validation croisée interne sur les plis d'entraînement) amène la pente à 1,01. Mais le RMSE passe de 4,30 à 5,12 et les paires EPA journalières de 82,2 % à 75,6 %.
+- **Pourquoi** : « déresserrer » les prédictions amplifie aussi leur erreur ; la pente n'était pas ce qui bloquait.
+- **Contournement** : `models.final.recalibrate: false`.
+- **Impact** : le compromis prédiction / étalonnage est documenté (notebook 06, section 8).
+
+### [2026-10-14] Sonde locale retirée du modèle
+- **Constat** : ablation sur le sous-échantillon : sans la famille « sonde locale (secondaire) », le RMSE passe de 4,30 à 4,27 et les paires EPA de 70,5 % à 71,6 % en horaire, de 82,2 % à 84,4 % en journalier.
+- **Pourquoi** : l'humidité officielle porte déjà l'information ; la sonde n'est fiable que 25 % des heures (notebook 02) et son humidité lit trop sec.
+- **Contournement** : `models.final.drop_families: ["sonde locale (secondaire)"]` ; le modèle final a 45 variables. Le seuil X de la sonde n'a plus d'effet (sensibilité X = 0,1 / 0,3 / 0,5 : RMSE 4,32 / 4,30 / 4,29, négligeable).
+- **Impact** : **argument produit** : la correction n'a besoin ni d'une sonde d'humidité ni d'une sonde qui marche.
+
+### [2026-10-14] Le voisinage citoyen est la famille décisive ; les valeurs manquantes sont bien gérées
+- **Constat** : sans le voisinage, le RMSE passe de 4,30 à 5,19 (+21 %) et les paires EPA de 70,5 % à 54,7 % en horaire. Viennent ensuite :
+  - dynamique passée : +4 % ;
+  - variables de temps : +2,5 % ;
+  - météo officielle : +1,3 % ;
+  - capteur brut : +1,1 %.
+
+  Sur les heures **sans voisins**, le modèle complet (qui voit des voisins « manquants ») fait 5,77 contre 5,67 pour un modèle appris sans la famille. La médiane des voisins porte 38 % du gain du modèle final.
+- **Pourquoi** : les voisins mesurent le même air au même moment, avec le même type de capteur. LightGBM apprend de quel côté envoyer une valeur manquante, mais le modèle a été optimisé surtout pour les heures avec voisins.
+- **Contournement** : la gestion native des manquants est gardée (≈ 2 % de perte sur ces heures seulement). Un modèle dédié aux heures sans voisins est une piste pour l'étape 7. Limite de la méthode : retirer une famille à la fois sous-estime les familles redondantes (le brut et la physique portent la même information).
+- **Impact** : voir l'entrée suivante.
+
+### [2026-10-14] Limite principale du produit : les heures sans voisins citoyens
+- **Constat** (modèle retenu, 5 plis, volume complet) : 21 % des heures (20,8 % pour les paires saines) n'ont pas au moins 3 voisins valides à ≤ 3 km.
+
+  | | RMSE horaire | % paires EPA horaire | % paires EPA journalier |
+  |---|---|---|---|
+  | Paires saines, avec voisins | 3,39 µg/m³ | 88,3 % | 92,0 % |
+  | Paires saines, sans voisins | 5,21 µg/m³ | 42,1 % | 58,6 % |
+  | Toutes paires, avec voisins | 3,54 µg/m³ | 84,3 % | 90,2 % |
+  | Toutes paires, sans voisins | 6,59 µg/m³ | 36,4 % | 49,6 % |
+
+  Toutes heures confondues, le RMSE vaut 3,84 (saines) et 4,38 (toutes). Sur le sous-échantillon, le RMSE sans voisins était de 5,7 pour 4,3 en moyenne.
+- **Pourquoi** : sans voisins, le modèle ne peut corriger que le biais moyen du capteur (humidité, gain), pas ses écarts propres à chaque heure.
+- **Contournement** : le découpage « avec / sans voisins » est donné dans tous les tableaux finaux, y compris le % de paires EPA (calculé sur les heures de chaque type, paires ayant ≥ 500 heures ou ≥ 30 jours de ce type). Pire cas : un capteur invérifiable sans voisins (RMSE 10,7, $R^2$ 0,08).
+- **Impact** : la promesse du produit dépend de la **densité du réseau**. Un capteur isolé n'atteint pas les cibles EPA dans plus de la moitié des cas.
+
+### [2026-10-14] Le réglage des hyperparamètres n'apporte que ≈ 2 % ; Optuna arrêté à 15 essais
+- **Constat** : 15 essais Optuna (TPE, graine 42) au lieu des 50 prévus. Le meilleur essai (n° 14 : 453 feuilles, 59 lignes par feuille, pas 0,023, 1 084 itérations) donne un RMSE de 4,22 contre 4,30 par défaut (−1,9 %). Il gagne sur 4 plis et fait jeu égal sur le 5ᵉ. Sur le volume complet : 3,84 contre 3,91 (−1,8 %), 79,7 % contre 77,3 % de paires EPA en horaire, identique en journalier (85,3 %). En comparaison, retirer le voisinage coûte +21 % et passer du linéaire à LightGBM avec toutes les variables gagne 35 %.
+- **Pourquoi** : les essais s'allongeaient (jusqu'à 4,6 min par essai sur le sous-échantillon) pour un gain marginal. **La performance vient des données et des variables**, pas du réglage fin.
+- **Contournement** : recherche arrêtée, meilleurs réglages gardés (`data/models/optuna_best.json`, `models.final.use_optuna: true`). `models.optuna_trials` vaut 15 et l'espace de recherche est dans la configuration (`models.optuna_space`), pour que la recherche soit reproductible.
+- **Impact** : le modèle final avec les réglages Optuna entraîne en 7,5 min sur 5 plis, contre 2,6 min par défaut, pour 2 % de gain.
+
+### [2026-10-14] Optuna contre ablation : même protocole, un écart de lecture
+- **Constat** : un RMSE d'environ 5,7 lu dans l'ablation semblait contredire les 4,22 d'Optuna.
+- **Pourquoi** : vérification faite :
+  - même découpage par station (colonne `fold` de la couche gold, GroupKFold sur `cv_group`) ;
+  - même sous-échantillon (20 % des paires, graine 42 : 1 169 171 heures de test des deux côtés) ;
+  - même empreinte de la table gold et même métrique (RMSE horaire, paires saines, µg/m³ après retour à l'échelle).
+  
+  Les 5,7 étaient le RMSE sur les **heures sans voisins**, pas le RMSE global (4,30).
+- **Contournement** : les tableaux d'ablation affichent désormais les deux colonnes (avec / sans voisins).
+- **Impact** : aucun sur les résultats ; c'est ce chiffre qui a fait apparaître la limite principale du produit.
+
+### [2026-10-14] Léger optimisme du chiffre final : hyperparamètres choisis sur les mêmes plis
+- **Constat** : les réglages Optuna ont été choisis sur les 5 plis du sous-échantillon. Les stations de test du modèle final sont donc celles qui ont servi au choix.
+- **Pourquoi** : une validation imbriquée (relancer Optuna sans le pli de test, pour chacun des 5 plis) aurait coûté ≈ 3 h de calcul pour un réglage qui rapporte 2 %.
+- **Contournement** : non faite. Le modèle final est donné avec les réglages par défaut (choisis avant de voir les données) **et** avec les réglages Optuna. L'optimisme est borné par leur écart : ≤ 0,07 µg/m³ de RMSE, ≤ 2,4 points de % EPA horaire.
+- **Impact** : le chiffre de référence de l'étape (3,84 µg/m³ ; 79,7 % / 85,3 %) est légèrement optimiste. Le chiffre « par défaut » (3,91 ; 77,3 % / 85,3 %) ne l'est pas. Le test 2024 → 2025 et le transfert vers la France (étape 7) seront, eux, hors sélection.
+
+### [2026-10-14] Point de vigilance : sur toutes paires, le modèle retenu fait moins bien que l'échelon 3
+- **Constat** : par rapport à l'échelon 3 (cible log, sans contrainte, avec sonde, réglages par défaut), le modèle final par défaut (µg/m³, contrainte, sans sonde) :
+  - gagne sur les paires saines : RMSE 3,91 contre 3,95, 77,3 % contre 76,7 % de paires EPA ;
+  - perd sur toutes paires : RMSE 4,45 contre 4,30 ; sans voisins, 6,66 contre 6,18. Le % de paires EPA de toutes paires est pourtant égal (72,9 % contre 72,5 %).
+  
+  Sur le sous-échantillon, ces choix ne dégradaient pas toutes paires (4,31 contre 4,34).
+- **Pourquoi** : non tranché ; les trois changements ont été faits ensemble. Hypothèse : une erreur quadratique en µg/m³ suit davantage les pics des capteurs abîmés qu'une erreur en log. Le sous-échantillon (95 paires saines notées) contenait trop peu de capteurs abîmés pour le voir.
+- **Contournement** : choix gardé, car le produit vise les capteurs sains (le score de santé repère les autres). Le RMSE de toutes paires est surveillé à l'étape 7.
+- **Impact** : une décision prise sur un sous-échantillon peut ne pas tenir sur le volume complet ; la décision log / µg pour les capteurs abîmés reste ouverte.
+
+### [2026-10-14] Paires invérifiables à l'entraînement : un léger gain, décision gardée
+- **Constat** : entraîner aussi sur les paires invérifiables donne, sur le sous-échantillon, un RMSE de 4,28 contre 4,30 (paires saines) et 4,31 contre 4,34 (toutes paires), et 73,7 % contre 70,5 % de paires EPA en horaire (3 paires).
+- **Pourquoi** : le modèle verrait des capteurs abîmés et apprendrait peut-être à s'en méfier ; l'écart reste dans le bruit du sous-échantillon.
+- **Contournement** : décision de l'étape 5 maintenue : on n'apprend pas sur des paires non vérifiées.
+- **Impact** : proposition pour l'étape 7, à mesurer sur le volume complet.
+
+### [2026-10-14] Score de santé : seuil validé sur un pli tenu à l'écart, transfert faible vers la France
+- **Constat** : pour chaque pli, on choisit le seuil maximisant le F1 sur les 4 autres plis ; il vaut entre 0,17 et 0,29. Sur le pli tenu à l'écart :
+  - précision de 48 % à 83 % (65 % au total, 81 sur 125) ;
+  - rappel de 48 % à 69 % (56 % au total, 81 sur 144).
+
+  En France (50 paires notées, 12 invérifiables), le seuil 0,19 choisi sur l'Allemagne signale 6 paires dont 3 justes : précision 50 %, rappel 25 %. Le seuil fixe 0,1 donne 85 % de précision et 40 % de rappel en Allemagne, mais ne repère qu'une paire abîmée sur 12 en France.
+- **Pourquoi** : en Allemagne, le score est solide. En France, l'échantillon est petit et le voisinage peut-être plus clairsemé (hypothèse).
+- **Contournement** : `evaluation/health.threshold_cv`, testé (le seuil n'est jamais choisi avec le pli de test). Le seuil 0,1 est gardé comme réglage prudent (peu de fausses alertes).
+- **Impact** : l'argument produit « repérer les capteurs en panne sans station » tient en Allemagne (≈ 2 alertes sur 3 justes), pas encore en France. À revoir à l'étape 7.
+
+### [2026-10-14] Temps de calcul et disque de l'étape 6
+- **Constat** : sur MacBook, entraînement sur 5 plis :
+  - échelle complète : 15 min, dont 8,6 min pour les quantiles ;
+  - ablation (10 runs, sous-échantillon) : 11 min ;
+  - Optuna (15 essais) : 34 min ;
+  - modèle final : 2,6 min avec les réglages par défaut, 7,5 min avec ceux d'Optuna.
+
+  La prédiction prend de 3 à 13 s par pli. MLflow occupe 0,5 Go (`mlruns/` : prédictions hors pli en Parquet, une par run) ; `mlflow.db` fait 4 Mo.
+- **Pourquoi** : les prédictions hors pli sont gardées pour pouvoir recalculer les métriques sans réentraîner (`python -m aircalib train --study rescore` a ajouté le découpage avec / sans voisins aux runs de l'échelle).
+- **Contournement** : les essais Optuna ne gardent pas leurs prédictions.
+- **Impact** : `du` donne 8,7 Gio pour `data/` et 0,5 Gio pour `mlruns/`, soit ≈ 9,2 Gio, sous le plafond de 10 Go.

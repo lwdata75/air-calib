@@ -224,6 +224,53 @@ evaluation:
   humidity_bins: [50, 60, 70, 80, 90, 95]
   level_bins: [5, 10, 15, 25, 50]
 
+models:
+  tracking_uri: sqlite:///mlflow.db   # relative to the project root
+  experiment: air-calib
+  seed: 42
+  # Side studies (ablation, Optuna, X, scale, unverifiable pairs) run on a fixed share of the pairs.
+  subsample_pair_share: 0.2
+  # Planned 50, stopped at 15 (trials grew to ~4.6 min for a ~2 % gain, journal): 15 reproduces the search (TPE, seed).
+  optuna_trials: 15
+  # Search space, in this order (TPE reproducibility); num_boost_round is tuned with the tree parameters.
+  optuna_space:
+    learning_rate: {low: 0.02, high: 0.2, log: true}
+    num_leaves: {low: 31, high: 511, log: true, integer: true}
+    min_data_in_leaf: {low: 50, high: 5000, log: true, integer: true}
+    feature_fraction: {low: 0.4, high: 1.0}
+    bagging_fraction: {low: 0.5, high: 1.0}
+    lambda_l2: {low: 0.001, high: 30.0, log: true}
+    num_boost_round: {low: 200, high: 1500, log: true, integer: true}
+  # Rung 1: ordinary least squares on ln values.
+  linear_features: [log_pm25, official_humidity, official_temperature]
+  # Monotone constraint (step 6, point 4): at equal other inputs, more raw PM never lowers the prediction.
+  monotone_features: [pm25_mean, pm25_median, log_pm25, physics_pm25, log_physics_pm25]
+  quantiles: [0.1, 0.5, 0.9]
+  # Retained configuration for the final run (filled in from the side studies, notebook 06).
+  # Decided on the subsample (notebook 06): ug/m3 target (RMSE 4.22 vs 4.30 in ln), monotone constraint (no loss),
+  # no recalibration (slope 1 but RMSE +19 %, daily EPA -7 points), no local probe (ablation: -0.03 ug/m3),
+  # LightGBM alone rather than the hybrid (the hybrid degrades on unverifiable pairs: R2 0.48 vs 0.70).
+  final:
+    log_target: false
+    residual_of: ""            # "log_physics_pm25" for the hybrid
+    monotone: true
+    recalibrate: false
+    use_optuna: true           # best of 15 Optuna trials (essai_14), stopped early: tuning brings ~2 %
+    drop_families: ["sonde locale (secondaire)"]
+  # LightGBM starting point (before Optuna).
+  num_boost_round: 600
+  lightgbm:
+    learning_rate: 0.05
+    num_leaves: 127
+    min_data_in_leaf: 500
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l2: 1.0
+    max_bin: 255
+    seed: 42
+    deterministic: true
+
 physics:
   # Two-parameter physical model (step 5), fitted on the training pairs only:
   #   PM_ref ~ a * PM_raw / C(RH),  C = 1 + (kappa / density_ratio) / (1 / a_w - 1),  a_w = RH / 100

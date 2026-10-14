@@ -144,7 +144,7 @@ def _official(chosen: pl.DataFrame, weather: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _local(settings: Settings, probes: pl.DataFrame) -> pl.DataFrame:
+def local_humidity_by_site(settings: Settings, probes: pl.DataFrame) -> pl.DataFrame:
     """Per site and hour, the reliable probe value (by ``humidity.probe_preference``)."""
     preference = {name: i for i, name in enumerate(settings.humidity.probe_preference)}
     return (
@@ -215,7 +215,7 @@ def build(settings: Settings) -> dict[str, pl.DataFrame]:
         .join(pm25, on=["sampling_point", "hour"], how="left")
         .join(_pm10_by_station(settings, pm10), on=["station_code", "hour"], how="left")
         .join(_official(chosen, weather), on=["pair_id", "hour"], how="left")
-        .join(_local(settings, probes), on=["location", "hour"], how="left")
+        .join(local_humidity_by_site(settings, probes), on=["location", "hour"], how="left")
         .with_columns(local_reliable=pl.col("local_humidity").is_not_null())
     )
 
