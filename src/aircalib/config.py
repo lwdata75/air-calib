@@ -7,7 +7,7 @@ Values can be overridden by environment variables prefixed with ``AIRCALIB_``
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -26,29 +26,41 @@ DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "default.yaml"
 class Paths(BaseModel):
     data_dir: Path
     reports_dir: Path
+    sample_subdir: str
+    sample: bool = False
 
     def resolve(self, root: Path) -> Paths:
         """Return a copy where relative paths are anchored at ``root``."""
-        return Paths(
-            data_dir=self.data_dir if self.data_dir.is_absolute() else root / self.data_dir,
-            reports_dir=self.reports_dir if self.reports_dir.is_absolute() else root / self.reports_dir,
+        return self.model_copy(
+            update={
+                "data_dir": self.data_dir if self.data_dir.is_absolute() else root / self.data_dir,
+                "reports_dir": self.reports_dir
+                if self.reports_dir.is_absolute()
+                else root / self.reports_dir,
+            }
         )
 
     @property
+    def layers(self) -> Path:
+        """Root of the medallion layers (``data/sample`` for ``--sample`` runs)."""
+        return self.data_dir / self.sample_subdir if self.sample else self.data_dir
+
+    @property
     def raw(self) -> Path:
-        return self.data_dir / "raw"
+        """Downloaded files, as received; deleted after conversion unless ``keep_raw``."""
+        return self.layers / "raw"
 
     @property
     def bronze(self) -> Path:
-        return self.data_dir / "bronze"
+        return self.layers / "bronze"
 
     @property
     def silver(self) -> Path:
-        return self.data_dir / "silver"
+        return self.layers / "silver"
 
     @property
     def gold(self) -> Path:
-        return self.data_dir / "gold"
+        return self.layers / "gold"
 
     @property
     def meta(self) -> Path:
@@ -79,6 +91,7 @@ class Http(BaseModel):
     backoff_base_s: float
     backoff_max_s: float
     timeout_s: float
+    progress_log_s: float
 
 
 class SensorCommunity(BaseModel):
@@ -87,6 +100,11 @@ class SensorCommunity(BaseModel):
     pm_types: list[str]
     humidity_types: list[str]
     head_bytes: int
+    pm_columns: list[str]
+    humidity_columns: list[str]
+    timestamp_format: str
+    keep_raw: bool
+    unit_workers: int
 
 
 class Discovery(BaseModel):
@@ -99,6 +117,8 @@ class Discovery(BaseModel):
     lag_check_start: date
     lag_check_days: int
     lag_check_max_lag_h: int
+    history_start_year: int
+    history_months: list[int]
 
 
 class Eea(BaseModel):
@@ -113,11 +133,64 @@ class Eea(BaseModel):
     valid_codes: list[int]
     verified_codes: list[int]
     missing_sentinel: float
+    keep_raw: bool
+    bronze_margin_days: int
+
+
+class Pairing(BaseModel):
+    radius_download_km: float
+    radius_train_km: float
+    sensor_types: list[str]
+
+    @model_validator(mode="after")
+    def _nested(self) -> Pairing:
+        if self.radius_train_km > self.radius_download_km:
+            raise ValueError("pairing.radius_train_km must not exceed pairing.radius_download_km")
+        return self
+
+
+class Humidity(BaseModel):
+    saturation_pct: float
+    max_pct: float
+    floor_pct: float
+    age_breaks_years: list[float]
+    faulty_hour_share: float
+    dead_month_share: float
+
+
+class Weather(BaseModel):
+    n_nearest: int
+    max_distance_km: float
+    clock_check_step_min: int
+    clock_check_max_offset_min: int
+
+
+class Dwd(BaseModel):
+    base_url: str
+    station_list: str
+    station_list_encoding: str
+    missing_sentinel: float
+    keep_raw: bool
+
+
+class MeteoFrance(BaseModel):
+    dataset_api_url: str
+    resource_title_regex: str
+    communes_url: str
+    department_aliases: dict[str, str]
+    columns: list[str]
+    keep_raw: bool
+
+
+class Physics(BaseModel):
+    kappa: float
+    density_ratio: float
+    rh_max_pct: float
 
 
 class Sample(BaseModel):
-    n_sensors: int
-    months: int
+    n_sensors_per_country: int
+    month: date
 
 
 class Settings(BaseSettings):
@@ -137,6 +210,12 @@ class Settings(BaseSettings):
     sensor_community: SensorCommunity
     discovery: Discovery
     eea: Eea
+    pairing: Pairing
+    humidity: Humidity
+    weather: Weather
+    dwd: Dwd
+    meteo_france: MeteoFrance
+    physics: Physics
     sample: Sample
 
     @classmethod
@@ -159,6 +238,17 @@ class Settings(BaseSettings):
     def _anchor_paths(self) -> Settings:
         self.paths = self.paths.resolve(PROJECT_ROOT)
         return self
+
+    def for_sample(self) -> Settings:
+        """Settings of a ``--sample`` run: layers under ``data/<sample_subdir>``, one month."""
+        first = self.sample.month.replace(day=1)
+        following = date(first.year + first.month // 12, first.month % 12 + 1, 1)
+        return self.model_copy(
+            update={
+                "paths": self.paths.model_copy(update={"sample": True}),
+                "period": Period(start=first, end=following - timedelta(days=1)),
+            }
+        )
 
 
 @lru_cache(maxsize=1)

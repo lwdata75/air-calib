@@ -6,8 +6,14 @@ de particules fines grand public (~30 €, Sensor.Community, surtout SDS011) pou
 une station officielle (EEA), et jusqu'à quelle distance d'une station la correction reste fiable ?
 - Zone principale : **Allemagne** (entraînement + validation croisée). **France** : test de transfert.
 - Période : 2024-01-01 → 2025-12-31 (configurable).
+- **Appariement : 1 capteur = 1 station** (la plus proche avec des heures vérifiées), SDS011 seul.
+  Téléchargement ≤ 3 km ; entraînement sur la bande `near` (≤ 1,5 km) ; bande `far` (1,5–3 km) = test « distance ».
+  GroupKFold par station sur **toutes** les distances. Évaluations toujours rapportées **par type de station**.
 - Cible : PM2.5 horaire de la station EEA (E1a vérifié). Entrées : PM brut + humidité/température
-  au capteur (sonde météo du même site `location`) + contexte.
+  au capteur (sonde météo du même site `location`) + humidité officielle (DWD / Météo-France) en secours + contexte.
+- Humidité saturée (≥ 99,9 %) ou figée (< 5 %, hors bornes, `NaN`) = **manquante** (jamais une vraie valeur) ;
+  mois-sonde « mort » si > 30 % d'heures en défaut (`humidity.dead_month_share`) ; κ-Köhler jamais appliqué au-delà
+  de `physics.rh_max_pct`.
 
 ## Contraintes non négociables
 - Coût 0 € : open data + open source, tout en local (MacBook M5 Pro, 48 Go).
@@ -44,14 +50,26 @@ une station officielle (EEA), et jusqu'à quelle distance d'une station la corre
 ## Architecture (médaillon)
 `sources → data/raw (temporaire) → data/bronze (Parquet zstd, contenu inchangé + manifeste)
 → data/silver (nettoyé, horaire UTC, particules+météo jointes) → data/gold (paires × heures + features)
-→ modèles + MLflow (sqlite:///mlflow.db)`. Tables de référence (inventaires, stations, paires) : `data/meta/`.
+→ modèles + MLflow (sqlite:///mlflow.db)`. Tables de l'étape 1 (inventaires, stations) : `data/meta/` ;
+tables de référence du plan (paires, sondes, stations météo) : `data/bronze/reference/`.
+`--sample` = mêmes commandes sur `data/sample/` (10 capteurs par pays, un mois : `sample.month`).
+Manifestes JSONL : `raw/<source>/_manifest.jsonl` (téléchargé) et `bronze/<source>/_manifest.jsonl` (converti).
 
 ## Faits vérifiés sur les vraies données (détails dans docs/JOURNAL.md)
 - Archive Sensor.Community : années passées en `/<AAAA>/<AAAA-MM-JJ>/…csv.gz` (gzip !), année en
   cours en `/<AAAA-MM-JJ>/`. Un listing de jour ≈ 5 Mo et ≈ 65 s. Horodatages UTC (vérifié via l'API live).
 - EEA : un Parquet par point de prélèvement avec tout l'historique ; E1a contient déjà 2024 et 2025.
   PM2.5 = 6001, PM10 = 5. `Value` en Decimal ; manquants = -999 / Validity -1. Horloge à décalage fixe
-  (pas de trou au changement d'heure) — décalage vérifié par corrélation décalée (notebook 01).
+  (pas de trou au changement d'heure) — `heure_UTC = Start − 1 h` en DE **et** FR (corrélation décalée, notebook 01).
+- DWD : zip par station (`historical/`, contrôlé, jusqu'au 31/12/2025), UTC, `-999` = manquant, liste des stations
+  à largeur fixe en Latin-1. Météo-France : un CSV gzip par département et période (URL via l'API data.gouv.fr),
+  beaucoup de stations sans humidité, Corse = `20`.
+- Les stations officielles aussi mesurent 100 % d'humidité (brouillard), mais rarement (1,7 % DWD, 2,8 % Météo-France) ;
+  quand une sonde sature, la station voisine ne l'est que 2,1 % du temps : panne de sonde. DHT22 : 53,5 % de mesures
+  saturées + 6,7 % figées à 1,0 % ; 59 % des DHT22 mortes toute la période ; la mort augmente avec l'âge.
+- Pièges vus en vrai : `NaN` (texte `nan`) ≠ vide et Polars le classe au-dessus de tout (`NaN >= 99.9` est vrai) ;
+  virgule décimale chez certains firmwares ; `sensor_type` en MAJUSCULES dans le contenu ; capteurs déplacés (un
+  capteur était à Hanoï avant Magdebourg). Horloges DWD et Météo-France vérifiées UTC (pas de saut hiver/été).
 
 ## Convention horaire du projet
 Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

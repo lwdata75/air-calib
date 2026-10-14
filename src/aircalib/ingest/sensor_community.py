@@ -16,6 +16,7 @@ import io
 import re
 import zlib
 from datetime import date
+from pathlib import Path
 
 import polars as pl
 
@@ -136,3 +137,84 @@ async def fetch_file(client: PoliteClient, url: str) -> bytes | None:
         return None
     response.raise_for_status()
     return response.content
+
+
+# ------------------------------------------------------------------------ bronze
+# Identity columns present in every archive file, with their bronze type.
+ID_COLUMNS = {
+    "sensor_id": pl.Int64,
+    "sensor_type": pl.String,
+    "location": pl.Int64,
+    "lat": pl.Float64,
+    "lon": pl.Float64,
+}
+
+
+def bronze_frame(
+    raw: pl.DataFrame, value_columns: list[str], timestamp_format: str
+) -> tuple[pl.DataFrame, dict[str, int]]:
+    """Type a raw (all-text) sensor-month table without changing its content.
+
+    Returns the typed table and audit counters:
+
+    * ``unparsed_<col>``: non-empty texts that could not be converted (set to null);
+    * ``decimal_commas``: numbers written with a decimal comma (``0,8``), read as ``0.8``;
+    * ``dropped_nonempty``: non-empty values in columns that bronze does not keep
+      (expected 0: those columns are empty in the archive);
+    * ``rows``.
+
+    Nothing is filtered: duplicates, outliers and saturated values stay in bronze.
+    """
+    schema = {**ID_COLUMNS, "timestamp": pl.Datetime("us"), **dict.fromkeys(value_columns, pl.Float64)}
+    present = raw.with_columns(
+        [pl.lit(None, dtype=pl.String).alias(c) for c in schema if c not in raw.columns]
+    )
+    floats = [c for c, dtype in schema.items() if dtype == pl.Float64]
+
+    def cast(c: str, dtype: pl.DataType) -> pl.Expr:
+        if c == "timestamp":
+            return pl.col(c).str.strptime(pl.Datetime("us"), timestamp_format, strict=False)
+        text = pl.col(c).str.strip_chars()
+        if c in floats:  # some firmwares write a decimal comma
+            text = text.str.replace(",", ".", literal=True)
+        return text.cast(dtype, strict=False)
+
+    typed = present.select(**{c: cast(c, dtype) for c, dtype in schema.items()})
+    stats = {"rows": raw.height}
+    stats["decimal_commas"] = int(
+        present.select(
+            pl.sum_horizontal([pl.col(c).str.contains(",", literal=True).fill_null(False) for c in floats])
+        )
+        .to_series()
+        .sum()
+    )
+    nonempty = present.select(
+        [(pl.col(c).str.strip_chars().str.len_chars() > 0).fill_null(False).alias(c) for c in schema]
+    )
+    for c in schema:
+        failed = nonempty[c] & typed[c].is_null()
+        stats[f"unparsed_{c}"] = int(failed.sum())
+    dropped = [c for c in raw.columns if c not in schema]
+    stats["dropped_nonempty"] = (
+        int(
+            raw.select(
+                pl.sum_horizontal(
+                    [(pl.col(c).str.strip_chars().str.len_chars() > 0).fill_null(False) for c in dropped]
+                )
+            )
+            .to_series()
+            .sum()
+        )
+        if dropped
+        else 0
+    )
+    return typed, stats
+
+
+def raw_unit_dir(raw_root: Path, sensor_id: int, month: date) -> Path:
+    """Folder holding the raw files of one sensor-month."""
+    return raw_root / str(sensor_id) / month.strftime("%Y-%m")
+
+
+def bronze_unit_path(bronze_root: Path, kind: str, sensor_id: int, month: date) -> Path:
+    return bronze_root / kind / str(sensor_id) / f"{month.strftime('%Y-%m')}.parquet"

@@ -100,3 +100,65 @@ def test_read_day_csv_keeps_raw_text_columns():
 
 def test_read_day_csv_empty_file():
     assert sc.read_day_csv(gzip.compress(b""), gzipped=True).is_empty()
+
+
+def test_bronze_frame_types_without_dropping_and_counts_problems():
+    raw = pl.DataFrame(
+        {
+            "sensor_id": ["7", "7", "7"],
+            "sensor_type": ["SDS011"] * 3,
+            "location": ["3", "3", "3"],
+            "lat": ["50.1", "50.1", ""],
+            "lon": ["8.2", "8.2", "8.2"],
+            "timestamp": ["2024-01-01T00:01:02", "2024-01-01 00:02", "2024-01-01T00:03:00"],
+            "P1": ["5.2", "n/a", None],
+            "durP1": [None, None, "1"],  # should always be empty
+            "P2": [" 3.1", "1999.9", ""],
+        }
+    )
+    typed, stats = sc.bronze_frame(raw, ["P1", "P2"], "%Y-%m-%dT%H:%M:%S")
+    assert typed.height == 3  # bronze never drops a row
+    assert typed.columns == ["sensor_id", "sensor_type", "location", "lat", "lon", "timestamp", "P1", "P2"]
+    assert typed["P2"].to_list() == [3.1, 1999.9, None]  # outlier kept, blank → null
+    assert stats["unparsed_timestamp"] == 1
+    assert stats["unparsed_P1"] == 1
+    assert stats["unparsed_lat"] == 0  # an empty text is "missing", not "unparsable"
+    assert stats["dropped_nonempty"] == 1
+
+
+def test_bronze_frame_adds_missing_value_columns_as_null():
+    raw = pl.DataFrame(
+        {
+            "sensor_id": ["9"],
+            "sensor_type": ["DHT22"],
+            "location": ["1"],
+            "lat": ["48.1"],
+            "lon": ["2.3"],
+            "timestamp": ["2024-01-01T00:00:00"],
+            "temperature": ["4.1"],
+            "humidity": ["99.9"],
+        }
+    )
+    typed, _ = sc.bronze_frame(raw, ["temperature", "humidity", "pressure"], "%Y-%m-%dT%H:%M:%S")
+    assert typed["pressure"].to_list() == [None]
+    assert typed["humidity"].to_list() == [99.9]
+
+
+def test_bronze_frame_reads_decimal_commas():
+    # Seen in the archive (sensor 96465, late 2025): "0,8;;;0,5" next to "16;;;4,7".
+    raw = pl.DataFrame(
+        {
+            "sensor_id": ["96465"] * 2,
+            "sensor_type": ["SDS011"] * 2,
+            "location": ["88857"] * 2,
+            "lat": ["52.352"] * 2,
+            "lon": ["13.408"] * 2,
+            "timestamp": ["2025-12-01T00:00:03", "2025-12-01T00:05:04"],
+            "P1": ["0,8", "16"],
+            "P2": ["0,5", "4,7"],
+        }
+    )
+    typed, stats = sc.bronze_frame(raw, ["P1", "P2"], "%Y-%m-%dT%H:%M:%S")
+    assert typed["P1"].to_list() == [0.8, 16.0]
+    assert typed["P2"].to_list() == [0.5, 4.7]
+    assert (stats["unparsed_P1"], stats["unparsed_P2"], stats["decimal_commas"]) == (0, 0, 3)

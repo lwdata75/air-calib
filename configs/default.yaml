@@ -6,6 +6,9 @@
 paths:
   data_dir: data
   reports_dir: reports
+  # `--sample` runs write their layers (raw/bronze/silver/gold) under data/<sample_subdir>/;
+  # the discovery reference tables in data/meta are shared by both modes.
+  sample_subdir: sample
 
 period:
   start: 2024-01-01
@@ -22,6 +25,7 @@ http:
   backoff_base_s: 1.0       # wait = base * 2**attempt (+ jitter)
   backoff_max_s: 60.0
   timeout_s: 180.0          # an archive day listing takes ~65 s to render
+  progress_log_s: 60.0      # long downloads log their progress at this interval
 
 sensor_community:
   archive_url: https://archive.sensor.community
@@ -32,6 +36,15 @@ sensor_community:
   humidity_types: [bme280, dht22, sht30, sht31, sht35, sht85, htu21d]
   # Bytes fetched with an HTTP Range request to read a file's first rows.
   head_bytes: 2048
+  # Columns kept in bronze (the archive also has durP1/ratioP1/durP2/ratioP2,
+  # altitude, pressure_sealevel: always empty, checked at conversion time).
+  pm_columns: [P1, P2]
+  humidity_columns: [temperature, humidity, pressure]
+  timestamp_format: "%Y-%m-%dT%H:%M:%S"
+  # Raw sensor-day files (~1.3 M gzip files) are deleted once converted to bronze.
+  keep_raw: false
+  # Sensor-months downloaded in parallel (their day requests share the HTTP limit above).
+  unit_workers: 4
 
 discovery:
   # One archive listing per month on this day-of-month gives the sensors
@@ -49,6 +62,10 @@ discovery:
   lag_check_start: 2025-01-06
   lag_check_days: 14
   lag_check_max_lag_h: 3
+  # Sensor age: sensor ids are allocated in sequence, so listings since the archive's
+  # start (twice a year before the study period) date each id's registration.
+  history_start_year: 2016
+  history_months: [1, 7]
 
 eea:
   api_url: https://eeadmz1-downloads-api-appservice.azurewebsites.net
@@ -69,7 +86,72 @@ eea:
   valid_codes: [1, 2, 3]
   verified_codes: [1]
   missing_sentinel: -999.0
+  # The raw files (full 2013+ history, ~1 MB each) are kept: discovery reads them.
+  keep_raw: true
+  # Bronze keeps the study period plus this margin (Start is on the station clock).
+  bronze_margin_days: 1
+
+pairing:
+  # Rule: 1 sensor = 1 station, the nearest one with verified data while the sensor is active.
+  radius_download_km: 3.0   # every pair up to this distance is downloaded
+  radius_train_km: 1.5      # pairs <= 1.5 km train the model; (1.5, 3] km = "distance" test set
+  sensor_types: [sds011]    # PMS/SPS sensors excluded (2 % of pairs, other optics)
+
+humidity:
+  # A reading is classified as: missing (null or NaN), out of range (< 0 or > max_pct), stuck low
+  # (< floor_pct), saturated (>= saturation_pct) or usable. Only usable readings are measurements.
+  saturation_pct: 99.9
+  max_pct: 100.0
+  # Official stations read < 5 % RH in 9 hours out of 5.27 M (DE + FR, 2024-2025); a DHT22 stuck
+  # at exactly 1.0 % is a probe failure, not dry air (notebook 02, section 7).
+  floor_pct: 5.0
+  # Probe age classes (years since the sensor id was registered) for the saturation analysis.
+  age_breaks_years: [1, 2, 4, 6]
+  # An hour is faulty when more than this share of its readings are not usable.
+  faulty_hour_share: 0.5
+  # A probe-month faulty in more than this share of its hours is a "dead" probe for that month
+  # (no reliable local humidity at all); below it, only the faulty hours are discarded.
+  # Chosen on the full 2024-2025 data (notebook 02, section 7.1): 0.3 sits in the trough of the
+  # distribution, and above it even the usable hours drift away from the official station
+  # (DHT22 median bias +13.8 points, BME280 +2.7 and growing).
+  dead_month_share: 0.3
+
+weather:
+  # Official weather stations used as a fallback for the sensor's own humidity probe.
+  n_nearest: 2              # keep a second station in case the first one has gaps
+  max_distance_km: 30.0
+  # Clock check of weather stations against the probes' temperature (10-min windows).
+  clock_check_step_min: 10
+  clock_check_max_offset_min: 120
+
+dwd:
+  # Hourly 2 m temperature + relative humidity (quality-controlled "historical" release).
+  base_url: https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/hourly/air_temperature/historical
+  station_list: TU_Stundenwerte_Beschreibung_Stationen.txt
+  station_list_encoding: latin-1
+  missing_sentinel: -999.0
+  keep_raw: false
+
+meteo_france:
+  # Hourly climatological data ("donnees climatologiques de base - horaires"), one gzip CSV
+  # per department and period; resource URLs are read from the data.gouv.fr dataset API.
+  dataset_api_url: https://www.data.gouv.fr/api/1/datasets/donnees-climatologiques-de-base-horaires/
+  resource_title_regex: "^HOR_departement_(?P<department>[0-9AB]+)_periode_(?P<first_year>\\d{4})-(?P<last_year>\\d{4})$"
+  # Commune centres (one request) tell which departments lie near a station.
+  communes_url: "https://geo.api.gouv.fr/communes?fields=code,codeDepartement,centre&format=json&type=commune-actuelle"
+  department_aliases: {"2A": "20", "2B": "20"}   # Corsica is one file for Meteo-France
+  columns: [NUM_POSTE, NOM_USUEL, LAT, LON, ALTI, AAAAMMJJHH, T, QT, U, QU]
+  keep_raw: false
+
+physics:
+  # kappa-Kohler hygroscopic growth (step 5): C = 1 + (kappa / density_ratio) / (1 / a_w - 1).
+  kappa: 0.4               # starting value, fitted on training data in step 5
+  density_ratio: 1.65
+  # C diverges when RH -> 100 %: the correction is never applied above this humidity
+  # (at 95 % C is already ~5.6 and a +-3 % sensor error changes it by a factor ~2).
+  rh_max_pct: 95.0
 
 sample:
-  n_sensors: 20
-  months: 1
+  # Small but representative subset: per country, sensors spread over the distance range.
+  n_sensors_per_country: 10
+  month: 2025-01-01

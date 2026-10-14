@@ -40,3 +40,56 @@ def pairs_within(
         )
         .filter(pl.col("distance_km") <= max_km)
     )
+
+
+def nearest_k(
+    points: pl.DataFrame,
+    candidates: pl.DataFrame,
+    *,
+    point_id: str,
+    candidate_id: str,
+    k: int,
+    max_km: float,
+) -> pl.DataFrame:
+    """The ``k`` nearest candidates of each point within ``max_km`` (rank 1 = nearest).
+
+    Ties are broken by candidate id so that the result is reproducible.
+    """
+    couples = pairs_within(
+        points.select(point_id, "lat", "lon"), candidates.select(candidate_id, "lat", "lon"), max_km
+    ).collect()
+    return (
+        couples.sort(point_id, "distance_km", candidate_id)
+        .with_columns(rank=pl.int_range(1, pl.len() + 1).over(point_id))
+        .filter(pl.col("rank") <= k)
+        .select(point_id, candidate_id, "distance_km", "rank")
+    )
+
+
+def weather_links(pairs: pl.DataFrame, weather: pl.DataFrame) -> pl.DataFrame:
+    """Official weather stations of each pair, with the sensor → weather-station distance.
+
+    ``pairs`` has ``sensor_id, sampling_point, sensor_lat, sensor_lon``; ``weather`` has
+    ``sampling_point, source, station_id, rank, lat, lon, distance_km`` (distance to
+    the EEA station, used to choose it). The humidity fallback is measured at the
+    weather station, so the distance that matters for the sensor is recomputed.
+    """
+    return (
+        pairs.select("sensor_id", "sampling_point", "sensor_lat", "sensor_lon")
+        .join(weather, on="sampling_point", how="inner")
+        .with_columns(
+            sensor_weather_km=haversine_km(
+                pl.col("sensor_lat"), pl.col("sensor_lon"), pl.col("lat"), pl.col("lon")
+            )
+        )
+        .select(
+            "sensor_id",
+            "sampling_point",
+            "source",
+            weather_station_id="station_id",
+            weather_rank="rank",
+            sensor_weather_km="sensor_weather_km",
+            station_weather_km="distance_km",
+        )
+        .sort("sensor_id", "weather_rank")
+    )

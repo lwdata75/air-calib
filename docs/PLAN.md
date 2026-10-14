@@ -5,29 +5,65 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 | # | Étape | Statut | Livrables principaux |
 |---|---|---|---|
 | 0 | Socle du projet | ✅ terminé | arborescence, `pyproject.toml` (uv), `Makefile`, `configs/default.yaml`, ruff/pytest, `.gitignore`, CLAUDE.md, PLAN, JOURNAL |
-| 1 | Exploration des sources et faisabilité (GO / NO-GO) | ✅ terminé — en attente de feu vert | `ingest/{http,sensor_community,eea,discovery}.py`, `transform/{pairing,hourly}.py`, `notebooks/01_sources_et_faisabilite.ipynb`, `python -m aircalib discover` |
-| 2 | Ingestion à l'échelle (bronze) | ⏳ à faire | téléchargeur async reprenable + manifeste, CSV → Parquet, EEA E1a PM2.5/PM10 DE+FR, notebook 02 |
-| 3 | Nettoyage (silver) | ⏳ à faire | règles qualité testées, agrégation horaire (≥ 75 %), jointure particules ↔ météo, contrats Pandera, entonnoir, notebook 03 |
-| 4 | Appariement et exploration (gold 1) | ⏳ à faire | paires capteur ↔ station, effet de l'humidité, dérive, notebook 04 |
-| 5 | Feature engineering (gold 2) | ⏳ à faire | familles de features documentées, κ-Köhler, notebook 05 |
+| 1 | Exploration des sources et faisabilité (GO / NO-GO) | ✅ terminé (GO) | `ingest/{http,sensor_community,eea,discovery}.py`, `transform/{pairing,hourly}.py`, `notebooks/01_sources_et_faisabilite.ipynb`, `python -m aircalib discover` |
+| 2 | Ingestion à l'échelle (bronze) | ✅ terminé — en attente de feu vert | `ingest/{plan,download,bronze,manifest,report,dwd,meteo_france}.py`, `schemas/bronze.py`, `transform/{physics,humidity,positions}.py`, `notebooks/02_ingestion_bronze.ipynb`, `reports/ingestion.md` |
+| 3 | Nettoyage (silver) | ⏳ à faire | règles qualité testées, agrégation horaire (≥ 75 %), jointure particules ↔ météo, contrôle d'horloge sur toutes les paires, contrats Pandera, entonnoir, notebook 03 |
+| 4 | Appariement et exploration (gold 1) | ⏳ à faire | paires × heures, effet de l'humidité, dérive, notebook 04 |
+| 5 | Feature engineering (gold 2) | ⏳ à faire | familles de features documentées, κ-Köhler ajusté, notebook 05 |
 | 6 | Modélisation + MLflow | ⏳ à faire | échelle de modèles, GroupKFold par station, test 2025, ablation, Optuna, notebooks 10–11 |
 | 7 | Évaluation finale, transfert, conclusions | ⏳ à faire | cibles EPA, transfert DE → FR, erreur vs distance, notebook 12 |
 | 8 | Finition | ⏳ à faire | README final, `make sample` depuis un clone propre, requirements, lint/tests au vert |
+
+## Décisions prises (feu vert du 14/10/2026)
+- **Appariement : 1 capteur = 1 station**, la plus proche ayant des heures vérifiées pendant l'activité du capteur ;
+  distance conservée.
+- **Rayons** : téléchargement jusqu'à **3 km** (`pairing.radius_download_km`), entraînement sur les paires
+  **≤ 1,5 km** (`pairing.radius_train_km`, bande `near`) ; la bande 1,5–3 km (`far`) est un **jeu de test
+  « distance »**.
+- **SDS011 seul** (`pairing.sensor_types`) ; PMS/SPS exclus (limite notée au journal).
+- **Période** : 2024-01-01 → 2025-12-31.
 
 ## Détail de l'étape 1 (fait)
 1. Échantillon réel Sensor.Community (SDS011, BME280, DHT22) : colonnes, types, anomalies → journal.
 2. EEA : métadonnées, codes polluants, colonnes du Parquet, drapeaux, disponibilité 2024–2025, horloge.
 3. Découverte des capteurs actifs sur 2024–2025 (un listing d'archive par mois + lecture d'en-tête par Range HTTP).
-4. Comptage des paires par rayon (0,5 / 1 / 1,5 / 2 / 3 km), Allemagne et France.
+4. Comptage des paires par rayon (0,5 / 1 / 1,5 / 2 / 3 km), Allemagne et France (corrigé à l'étape 2 : une station
+   par capteur).
 5. Notebook 01 et recommandation GO / NO-GO chiffrée.
 
-### Résultat de l'étape 1 : GO
-- DE à 1,5 km : 568 capteurs, 185 stations, ≈ 6,2 M heures communes estimées, 84 % avec sonde d'humidité.
-- FR à 1,5 km : 62 capteurs, 47 stations (test de transfert).
-- Horloge EEA vérifiée : `heure_UTC = Start − 1 h` (DE et FR).
-- Disque estimé : ≈ 2,5 Go bronze capteurs + ≈ 0,8 Go EEA.
+## Détail de l'étape 2 (fait)
+1. Plan : paires finales (`bronze/reference/pairs.parquet`), sondes d'humidité du même site, unités capteur × mois
+   sur la fenêtre d'activité.
+2. Téléchargement asynchrone poli et reprenable (manifestes JSONL) : Sensor.Community, EEA PM2.5 + PM10, DWD,
+   Météo-France ; dates d'enregistrement des capteurs (âge des sondes).
+3. Conversion bronze : Parquet zstd, contrats Pandera stricts, compteurs d'audit, suppression des bruts convertis.
+4. Rapport `reports/ingestion.md`, notebook 02 (volumes, échecs, durée, disque, saturation de l'humidité).
+5. `physics.py` : κ-Köhler jamais appliqué à une humidité saturée ni au-dessus de `physics.rh_max_pct`.
+6. Qualité de l'humidité (`transform/humidity.py`) : statut de chaque mesure (manquante / hors bornes / figée basse /
+   saturée / utilisable), mois-sondes « morts » au-delà de X = 0,3 d'heures en défaut, croisement avec l'âge, preuve
+   contre la météo officielle.
 
-## Décisions en attente (à valider avec l'utilisateur avant l'étape 2)
-- Rayon : **1,5 km recommandé** (alternative : 3 km = 1 269 capteurs DE, ≈ + 3 h de téléchargement, ≈ + 3 Go).
-- Périmètre capteur : **SDS011 uniquement** pour l'entraînement (98 % des paires DE).
-- Période : 2024-01-01 → 2025-12-31 (E1a vérifié disponible sur toute la période).
+Résultat (volume complet) : 45 337 unités, 1,21 million de fichiers, 667,7 millions de lignes, **0 échec** ; 3 h 04 de
+téléchargement, 12 min 35 s de conversion ; pic de disque ≈ 11 Go, final 5,9 Go ; **38,9 % des heures-sondes
+d'humidité récupérables**.
+
+## Engagements pour les étapes suivantes (demandés au feu vert de l'étape 2)
+- **Étape 3 (silver)** :
+  - humidité **saturée** (≥ `humidity.saturation_pct`) ou **figée** = **manquante**, jamais une vraie valeur :
+    `reading_status` (vide/`NaN`, hors bornes, < `humidity.floor_pct`, saturée), mois morts
+    (`humidity.dead_month_share` = 0,3) entièrement écartés, heures en défaut écartées dans les mois sains, valeurs
+    constantes sur plusieurs heures à détecter ; feature binaire « humidité locale fiable » ; humidité officielle
+    (DWD / Météo-France) en secours, en prenant la station la plus proche **du capteur** parmi les rangs 1 et 2 ;
+    distance capteur ↔ station météo gardée comme variable ;
+  - **contrôle d'horloge automatique sur toutes les paires** (corrélation décalée après correction
+    `Start − 1 h`) : une paire dont le meilleur décalage n'est pas 0 est signalée, exclue et comptée dans
+    `reports/funnel.md` ;
+  - capteurs déplacés pendant la période : mesures découpées par position (distance recalculée) ;
+  - sentinelles `-999` (EEA, DWD) et `NaN` → manquant ; codes qualité Météo-France douteux (2) écartés ;
+  - `sensor_type` normalisé en minuscules (le contenu est en majuscules).
+- **Étape 5** : l'humidité « fiable » des sondes lit trop sec (−13 points BME280) : comparer humidité locale, officielle
+  et locale corrigée par l'officielle ; âge de la sonde comme variable candidate.
+- **Étapes 4 → 7** : `station_type` et `station_area` conservés dans gold ; **toutes les évaluations rapportées par
+  type de station** (trafic / fond urbain / périurbain / rural).
+- **Étape 6** : validation croisée **groupée par station (GroupKFold) sur toutes les distances** : une station n'est
+  jamais à la fois en entraînement et en test (145 stations ont des capteurs dans les deux bandes).

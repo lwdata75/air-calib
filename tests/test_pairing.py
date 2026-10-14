@@ -1,7 +1,7 @@
 import polars as pl
 import pytest
 
-from aircalib.transform.pairing import haversine_km, pairs_within
+from aircalib.transform.pairing import haversine_km, pairs_within, weather_links
 
 
 def _distance(lat1, lon1, lat2, lon2):
@@ -42,3 +42,24 @@ def test_pairs_within_handles_longitude_shrinkage():
     stations = pl.DataFrame({"sampling_point": ["A"], "lat": [60.0], "lon": [10.017]})
     pairs = pairs_within(sensors, stations, max_km=1.0).collect()
     assert pairs["distance_km"].item() == pytest.approx(0.945, abs=0.01)
+
+
+def test_weather_links_measure_distance_from_the_sensor_not_the_station():
+    pairs = pl.DataFrame(
+        {"sensor_id": [1], "sampling_point": ["A"], "sensor_lat": [50.0], "sensor_lon": [8.0]}
+    )
+    weather = pl.DataFrame(
+        {
+            "sampling_point": ["A", "A"],
+            "source": ["dwd", "dwd"],
+            "station_id": [44, 45],
+            "rank": [2, 1],
+            "lat": [50.2, 50.1],
+            "lon": [8.0, 8.0],
+            "distance_km": [21.0, 12.0],  # distances to the EEA station, not to the sensor
+        }
+    )
+    out = weather_links(pairs, weather)
+    assert out["weather_rank"].to_list() == [1, 2]
+    assert out["sensor_weather_km"][0] == pytest.approx(11.12, abs=0.01)
+    assert out["station_weather_km"].to_list() == [12.0, 21.0]

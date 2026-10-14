@@ -1,7 +1,8 @@
-"""Command-line interface: ``python -m aircalib <command>``.
+"""Command-line interface: ``python -m aircalib <command> [--sample]``.
 
 Commands are added stage by stage (see docs/PLAN.md); ``all`` runs every
-stage implemented so far, in order.
+stage implemented so far, in order. ``--sample`` runs the same code on a small
+subset written under ``data/sample/``.
 """
 
 from __future__ import annotations
@@ -13,14 +14,21 @@ from typing import Annotated
 import polars as pl
 import typer
 
-from aircalib.config import get_settings
-from aircalib.ingest import discovery
+from aircalib.config import Settings, get_settings
+from aircalib.ingest import bronze as bronze_stage
+from aircalib.ingest import discovery, plan, report
+from aircalib.ingest import download as download_stage
 from aircalib.logging import console, setup_logging
 
 app = typer.Typer(help="Calibrate low-cost PM sensors against EEA reference stations.", no_args_is_help=True)
 
 SampleOpt = Annotated[bool, typer.Option("--sample", help="Fast iteration on a small subset.")]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v", help="Debug logging.")]
+
+
+def _settings(sample: bool) -> Settings:
+    settings = get_settings()
+    return settings.for_sample() if sample else settings
 
 
 @app.callback()
@@ -32,16 +40,37 @@ def _main(verbose: VerboseOpt = False) -> None:
 def discover(sample: SampleOpt = False) -> None:
     """Step 1: inventory sensors and stations, count candidate pairs, check clocks."""
     if sample:
-        console.print("[yellow]--sample has no effect on discovery (metadata only).[/]")
+        console.print("[yellow]--sample has no effect on discovery (shared reference tables).[/]")
     results = asyncio.run(discovery.run(get_settings(), today=date.today()))
     with pl.Config(tbl_rows=40, tbl_cols=12):
         console.print(results["summary"])
+
+
+@app.command()
+def download(sample: SampleOpt = False) -> None:
+    """Step 2a: build the plan and fetch every raw file it needs (resumable)."""
+    settings = _settings(sample)
+    the_plan = plan.build_plan(settings)
+    failures = asyncio.run(download_stage.run(settings, the_plan, today=date.today()))
+    console.print(f"download failures per source: {failures}")
+    console.print(f"report: {report.write(settings)}")
+
+
+@app.command()
+def bronze(sample: SampleOpt = False) -> None:
+    """Step 2b: convert raw files to validated Parquet and delete the converted raw files."""
+    settings = _settings(sample)
+    failures = bronze_stage.run(settings, plan.load_plan(settings))
+    console.print(f"bronze failures per source: {failures}")
+    console.print(f"report: {report.write(settings)}")
 
 
 @app.command(name="all")
 def run_all(sample: SampleOpt = False) -> None:
     """Run every implemented stage in order."""
     discover(sample=sample)
+    download(sample=sample)
+    bronze(sample=sample)
 
 
 @app.command()

@@ -42,8 +42,8 @@ def _meta(settings: Settings) -> Path:
     return path
 
 
-def eea_bronze_path(settings: Settings, pollutant: str, country: str, sampling_point: str) -> Path:
-    return settings.paths.bronze / "eea" / pollutant / country / f"{sampling_point}.parquet"
+def eea_raw_path(settings: Settings, pollutant: str, country: str, sampling_point: str) -> Path:
+    return eea.raw_path(settings.paths.raw, pollutant, country, sampling_point)
 
 
 # ----------------------------------------------------------------- period sampling
@@ -71,7 +71,7 @@ async def _listing(
     return frame
 
 
-async def collect_listings(settings: Settings, today: date) -> pl.DataFrame:
+async def collect_listings(settings: Settings, today: date, days: list[date] | None = None) -> pl.DataFrame:
     """Archive file listings of the sampled days (one row per sensor-day file).
 
     A listing is a ~5 MB page that the server renders slowly; with many in
@@ -80,7 +80,8 @@ async def collect_listings(settings: Settings, today: date) -> pl.DataFrame:
     """
     cache = _meta(settings) / "sc_listings"
     cache.mkdir(exist_ok=True)
-    days = sample_days(settings.period.start, settings.period.end, settings.discovery.sample_day_of_month)
+    if days is None:
+        days = sample_days(settings.period.start, settings.period.end, settings.discovery.sample_day_of_month)
     gate = asyncio.Semaphore(settings.discovery.listing_concurrency)
     async with polite_client(settings.http) as client:
         with Progress(console=console, transient=True, disable=not console.is_terminal) as progress:
@@ -101,6 +102,58 @@ async def collect_listings(settings: Settings, today: date) -> pl.DataFrame:
         "listed %d/%d sampled days: %d sensor-day files", len(days) - len(failed), len(days), listings.height
     )
     return listings
+
+
+# ------------------------------------------------------------- sensor registration
+def history_days(first_year: int, months: list[int], before: date, day_of_month: int) -> list[date]:
+    """Listing days used to date sensor registrations, strictly before ``before``."""
+    return [
+        d
+        for year in range(first_year, before.year + 1)
+        for month in months
+        if (d := date(year, month, day_of_month)) < before
+    ]
+
+
+def registration_curve(listings: pl.DataFrame) -> pl.DataFrame:
+    """Highest sensor id seen up to each listing day (ids are allocated in sequence)."""
+    return (
+        listings.group_by("date")
+        .agg(max_sensor_id=pl.col("sensor_id").max())
+        .sort("date")
+        .with_columns(pl.col("max_sensor_id").cum_max())
+    )
+
+
+def registration_dates(sensor_ids: pl.DataFrame, curve: pl.DataFrame) -> pl.DataFrame:
+    """First listing day whose highest id reaches the sensor id: the sensor existed by then.
+
+    The true registration lies between the previous listing day and this one
+    (``registered_after``, ``registered_by``); null bounds mean "outside the curve".
+    """
+    by = (
+        curve.with_columns(registered_after=pl.col("date").shift(1))
+        .rename({"date": "registered_by"})
+        .sort("max_sensor_id")
+    )
+    return (
+        sensor_ids.select("sensor_id")
+        .unique()
+        .sort("sensor_id")
+        .join_asof(by, left_on="sensor_id", right_on="max_sensor_id", strategy="forward")
+        .select("sensor_id", "registered_after", "registered_by")
+    )
+
+
+async def sensor_registrations(settings: Settings, sensor_ids: pl.DataFrame, today: date) -> pl.DataFrame:
+    """Registration window of each sensor, from archive listings since the project's start."""
+    d = settings.discovery
+    days = history_days(d.history_start_year, d.history_months, settings.period.start, d.sample_day_of_month)
+    days += sample_days(settings.period.start, settings.period.end, d.sample_day_of_month)
+    listings = await collect_listings(settings, today, days)
+    curve = registration_curve(listings)
+    curve.write_parquet(_meta(settings) / "sc_registration_curve.parquet")
+    return registration_dates(sensor_ids, curve)
 
 
 # -------------------------------------------------------------------- live snapshot
@@ -132,10 +185,13 @@ async def live_snapshot(settings: Settings, today: date) -> pl.DataFrame:
     """Sensors that emitted in the last 5 minutes, with the UTC time we asked.
 
     ``retrieved_at_utc`` lets us check the clock of the ``timestamp`` field.
+    The first snapshot taken is reused by later runs: it decides which sensors
+    are skipped, so refreshing it would silently change the inventory.
     """
+    cached = sorted(_meta(settings).glob("sc_live_snapshot_*.parquet"))
+    if cached:
+        return pl.read_parquet(cached[0])
     path = _meta(settings) / f"sc_live_snapshot_{today.isoformat()}.parquet"
-    if path.exists():
-        return pl.read_parquet(path)
     async with polite_client(settings.http) as client:
         response = await client.get(settings.sensor_community.live_snapshot_url)
         response.raise_for_status()
@@ -290,13 +346,13 @@ async def eea_stations(settings: Settings, pollutant: str = "pm25") -> pl.DataFr
 async def download_station_files(
     settings: Settings, stations: pl.DataFrame, pollutant: str = "pm25"
 ) -> pl.DataFrame:
-    """Download the E1a Parquet of the given sampling points into bronze (as-is)."""
+    """Download the E1a Parquet of the given sampling points into ``raw`` (as-is)."""
     async with polite_client(settings.http) as client:
         with Progress(console=console, transient=True, disable=not console.is_terminal) as progress:
             task = progress.add_task(f"EEA {pollutant} files", total=stations.height)
 
             async def one(rec: dict) -> dict:
-                dest = eea_bronze_path(settings, pollutant, rec["country"], rec["sampling_point"])
+                dest = eea_raw_path(settings, pollutant, rec["country"], rec["sampling_point"])
                 await eea.download_parquet(client, rec["url"], dest)
                 progress.advance(task)
                 return {
@@ -319,7 +375,13 @@ def station_availability(settings: Settings, files: pl.DataFrame) -> pl.DataFram
 def pair_table(
     inventory: pl.DataFrame, stations: pl.DataFrame, availability: pl.DataFrame, max_km: float
 ) -> pl.DataFrame:
-    """Outdoor PM sensor ↔ station couples within ``max_km`` and their usable overlap.
+    """One row per outdoor PM sensor: its nearest usable station within ``max_km``.
+
+    Rule (1 sensor = 1 station): among the stations closer than ``max_km`` that
+    have verified hours while the sensor is active, keep the nearest one
+    (ties broken by sampling point id). ``n_stations_within`` keeps track of how
+    many usable stations were in reach, and ``distance_km`` is kept to study the
+    error as a function of distance.
 
     ``overlap_hours`` estimates the hours where both sources are usable: for each
     month where the sensor appears in the sampled listing, the station's valid
@@ -334,27 +396,35 @@ def pair_table(
         availability.group_by("sampling_point")
         .agg(total_hours=pl.col("valid_hours").sum())
         .join(stations.select("sampling_point", "station_code"), on="sampling_point")
-        .sort("total_hours", descending=True)
+        .sort("total_hours", "sampling_point", descending=[True, False])
         .unique("station_code", keep="first")
         .select("sampling_point")
     )
     st = stations.join(best_points, on="sampling_point").select(
         "sampling_point", "station_code", "country", "station_type", "station_area", "lat", "lon"
     )
-    pairs = pairs_within(
+    couples = pairs_within(
         pm.select("sensor_id", "sensor_type", "location_id", "months", "lat", "lon"), st, max_km
     ).collect()
 
     overlap = (
-        pairs.select("sensor_id", "sampling_point", "months")
+        couples.select("sensor_id", "sampling_point", "months")
         .explode("months")
         .rename({"months": "month"})
         .join(availability, on=["sampling_point", "month"], how="left")
         .group_by("sensor_id", "sampling_point")
         .agg(overlap_hours=pl.col("valid_hours").fill_null(0).sum())
     )
+    usable = couples.join(overlap, on=["sensor_id", "sampling_point"], how="left").filter(
+        pl.col("overlap_hours") > 0
+    )
+    nearest = (
+        usable.with_columns(n_stations_within=pl.len().over("sensor_id"))
+        .sort("distance_km", "sampling_point")
+        .unique("sensor_id", keep="first")
+    )
     with_humidity = (
-        pairs.select("sensor_id", "location_id", "months")
+        nearest.select("sensor_id", "location_id", "months")
         .join(humidity, on="location_id", how="inner")
         .filter(pl.col("months").list.set_intersection("hum_months").list.len() > 0)
         .select("sensor_id")
@@ -362,35 +432,32 @@ def pair_table(
         .with_columns(has_humidity=pl.lit(True))
     )
     return (
-        pairs.join(overlap, on=["sensor_id", "sampling_point"], how="left")
-        .join(with_humidity, on="sensor_id", how="left")
+        nearest.join(with_humidity, on="sensor_id", how="left")
         .with_columns(pl.col("has_humidity").fill_null(False))
         .drop("months")
+        .sort("sensor_id")
     )
 
 
-def feasibility_summary(
-    pairs: pl.DataFrame, radii_km: list[float], min_overlap_hours: int = 0
-) -> pl.DataFrame:
-    """Pair counts per country and radius (``pairs`` computed at the largest radius)."""
+def feasibility_summary(pairs: pl.DataFrame, radii_km: list[float]) -> pl.DataFrame:
+    """Pair counts per country and radius (``pairs`` = one nearest station per sensor).
+
+    Because each sensor keeps a single station, ``n_pairs`` equals ``n_sensors``;
+    several sensors can share the same station, hence ``n_stations`` is smaller.
+    """
     rows = []
     for radius in radii_km:
-        within = pairs.filter(pl.col("distance_km") <= radius, pl.col("overlap_hours") > min_overlap_hours)
-        nearest = within.sort("distance_km").unique("sensor_id", keep="first")
+        within = pairs.filter(pl.col("distance_km") <= radius)
         rows.append(
             within.group_by("country")
             .agg(
                 n_pairs=pl.len(),
-                n_stations=pl.col("station_code").n_unique(),
                 n_sensors=pl.col("sensor_id").n_unique(),
-            )
-            .join(
-                nearest.group_by("country").agg(
-                    median_overlap_h=pl.col("overlap_hours").median(),
-                    total_overlap_h=pl.col("overlap_hours").sum(),
-                    humidity_share=pl.col("has_humidity").mean(),
-                ),
-                on="country",
+                n_stations=pl.col("station_code").n_unique(),
+                median_overlap_h=pl.col("overlap_hours").median(),
+                total_overlap_h=pl.col("overlap_hours").sum(),
+                humidity_share=pl.col("has_humidity").mean(),
+                traffic_share=(pl.col("station_type") == "traffic").mean(),
             )
             .with_columns(radius_km=pl.lit(radius))
         )
@@ -405,6 +472,7 @@ def feasibility_summary(
             "median_overlap_h",
             "total_overlap_h",
             "humidity_share",
+            "traffic_share",
         )
         .sort("country", "radius_km")
     )
@@ -507,7 +575,7 @@ async def timezone_check(settings: Settings, pairs: pl.DataFrame, today: date) -
             .collect()
         )
         ref = (
-            eea.scan_observations(eea_bronze_path(settings, "pm25", pair["country"], pair["sampling_point"]))
+            eea.scan_observations(eea_raw_path(settings, "pm25", pair["country"], pair["sampling_point"]))
             .filter(pl.col("validity").is_in(settings.eea.valid_codes))
             .select(hour=pl.col("start"), value=pl.col("value"))
             .collect()
@@ -551,8 +619,12 @@ async def run(settings: Settings, today: date) -> dict[str, pl.DataFrame]:
     summary = feasibility_summary(pairs, settings.discovery.radii_km)
     summary.write_parquet(meta / "feasibility_summary.parquet")
 
-    lags = await timezone_check(settings, pairs, today)
-    lags.write_parquet(meta / "eea_clock_lag_check.parquet")
+    lag_path = meta / "eea_clock_lag_check.parquet"
+    if lag_path.exists():
+        lags = pl.read_parquet(lag_path)
+    else:
+        lags = await timezone_check(settings, pairs, today)
+        lags.write_parquet(lag_path)
     return {
         "live": live,
         "listings": listings,

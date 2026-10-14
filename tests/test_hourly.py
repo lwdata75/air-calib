@@ -1,10 +1,11 @@
+import math
 from datetime import datetime, timedelta
 
 import numpy as np
 import polars as pl
 import pytest
 
-from aircalib.transform.hourly import hourly_mean, lagged_correlation
+from aircalib.transform.hourly import hourly_mean, lagged_correlation, offset_correlation, ten_minute_means
 
 
 def test_hourly_mean_labels_hour_by_its_start():
@@ -43,3 +44,30 @@ def test_lagged_correlation_recovers_known_clock_offset(true_lag):
     best = lags.sort("pearson_r", descending=True)["lag_h"][0]
     assert best == true_lag
     assert lags.height == 7
+
+
+def test_offset_correlation_finds_a_one_hour_clock_shift():
+    # A smooth daily cycle sampled every 10 minutes, and a reference labelled one hour late (UTC+1).
+    t0 = datetime(2024, 7, 1)
+    times = [t0 + timedelta(minutes=10 * i) for i in range(6 * 24 * 10)]
+    series = pl.DataFrame(
+        {"time": times, "value": [math.sin(2 * math.pi * i / 144) for i in range(len(times))]}
+    )
+    hourly = series.filter(pl.col("time").dt.minute() == 0)
+    reference = hourly.with_columns(time=pl.col("time") + pl.duration(hours=1))  # local-time labels
+    out = offset_correlation(series, reference, list(range(-120, 121, 10)))
+    assert out.sort("pearson_r", descending=True)["offset_min"][0] == -60
+    same_clock = offset_correlation(series, hourly, list(range(-120, 121, 10)))
+    assert same_clock.sort("pearson_r", descending=True)["offset_min"][0] == 0
+
+
+def test_ten_minute_means_are_centred():
+    raw = pl.DataFrame(
+        {
+            "ts": [datetime(2024, 1, 1, 0, 4, 59), datetime(2024, 1, 1, 0, 5), datetime(2024, 1, 1, 0, 14)],
+            "v": [1.0, 3.0, 5.0],
+        }
+    )
+    out = ten_minute_means(raw, "ts", "v", 10).collect()
+    assert out["time"].to_list() == [datetime(2024, 1, 1, 0, 0), datetime(2024, 1, 1, 0, 10)]
+    assert out["value"].to_list() == [1.0, 4.0]

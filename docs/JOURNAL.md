@@ -88,3 +88,145 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : chaque fichier Parquet porte un en-tête et des métadonnées de schéma ; sur ≈ 575 lignes, ce coût fixe domine.
 - **Contournement** : la couche bronze regroupera les jours **par capteur et par mois** (une partition = un fichier).
 - **Impact** : ≈ 2,5 Go de bronze estimés à 1,5 km (≈ 5,6 Go à 3 km), dans le budget de 5–10 Go.
+
+---
+
+## Étape 2 — Ingestion à l'échelle (couche bronze)
+
+### [2026-10-14] Le tableau des paires de l'étape 1 comptait des couples, pas des paires
+- **Constat** : en Allemagne à 3 km, le tableau annonçait 1 876 « paires » pour 1 269 capteurs. 932 capteurs n'ont qu'une station utilisable à moins de 3 km, mais 392 en ont deux et 125 en ont trois à six : chaque couple (capteur, station) était compté. Le résumé de l'étape 1 affirmait pourtant « une station par capteur » : c'était faux pour `n_pairs` et `n_stations` (le nombre de capteurs, lui, était juste).
+- **Pourquoi** : `pair_table` gardait tous les couples à moins du rayon ; seules les colonnes « heures communes » et « humidité » étaient calculées sur la station la plus proche.
+- **Contournement** : règle finale **1 capteur = 1 station** : la plus proche *ayant des heures vérifiées pendant l'activité du capteur* (départage par identifiant), distance conservée, nombre de stations à portée gardé dans `n_stations_within`. Test unitaire avec un capteur à portée de deux stations et une station sans données. Notebook 01 corrigé et ré-exécuté.
+- **Impact** : nombres de capteurs inchangés, sauf un capteur frontalier compté autrefois dans les deux pays (DE 3 km : 1 269 → 1 268). Stations utilisées : DE 1,5 km 185 → **179**, DE 3 km 253 → **241**, FR 1,5 km 47 → **43**, FR 3 km 84 → **67**.
+
+### [2026-10-14] Décision : télécharger jusqu'à 3 km, entraîner sur ≤ 1,5 km, SDS011 seul
+- **Constat** : 1 399 paires SDS011 (DE 559 « near » ≤ 1,5 km + 698 « far » ; FR 48 + 94). **145 stations** ont des capteurs dans les deux bandes (69 seulement « near », 84 seulement « far »).
+- **Pourquoi** : la bande 1,5–3 km sert de jeu de test « distance » pour la question business (erreur en fonction de la distance). Comme beaucoup de stations ont des capteurs proches *et* lointains, un découpage naïf mettrait la même station en entraînement et en test.
+- **Contournement** : `pairing.radius_download_km = 3.0`, `pairing.radius_train_km = 1.5`, colonne `distance_band` (`near`/`far`) dans la table des paires. À l'étape 6, la validation croisée groupée par station (*GroupKFold*) s'appliquera à **toutes** les distances : une station n'est jamais à la fois en entraînement et en test.
+- **Impact** : volume × 2,3 par rapport à 1,5 km (≈ 1,35 million de fichiers capteur-jour) ; le test « distance » aura 698 capteurs en Allemagne.
+
+### [2026-10-14] Limite : les capteurs PMS et SPS sont exclus
+- **Constat** : parmi les paires à 3 km, 50 capteurs ne sont pas des SDS011 (FR : 36 PMS7003, 2 PMS5003, 1 SPS30 ; DE : 8 SPS30, 3 PMS).
+- **Pourquoi** : optique et algorithme différents (le PMS7003 n'a pas la même réponse à l'humidité) ; trop peu nombreux pour un modèle à part.
+- **Contournement** : `pairing.sensor_types = [sds011]` ; ces capteurs ne sont pas téléchargés.
+- **Impact** : les conclusions valent **pour le SDS011 seulement** ; le transfert vers la France perd 39 capteurs (22 % des 181 paires françaises).
+
+### [2026-10-14] Limite de représentativité : le type de station suit la donnée jusqu'à gold
+- **Constat** : en Allemagne, 317 des 559 paires « near » et 362 des 698 paires « far » ont une station **trafic** (au total, 678 des 1 257 paires allemandes ont une station trafic urbaine) ; en France, 16 sur 48 et 31 sur 94.
+- **Pourquoi** : les stations trafic sont en centre-ville, là où les capteurs citoyens sont denses ; elles mesurent en bord de route, pas sur un balcon voisin.
+- **Contournement** : `station_type` (trafic, fond, industrielle) et `station_area` (urbaine, périurbaine, rurale) sont conservées dans la table des paires et le seront jusqu'à la couche gold ; **toutes les évaluations seront rapportées par type de station**.
+- **Impact** : une partie de l'écart capteur ↔ station est une différence de lieu que la correction ne peut pas supprimer ; elle sera chiffrée séparément pour les stations trafic.
+
+### [2026-10-14] Les fichiers EEA bruts étaient rangés dans `bronze/`
+- **Constat** : à l'étape 1, les 381 Parquet EEA (historique 2013–2025, tels que reçus) étaient écrits dans `data/bronze/eea/`.
+- **Pourquoi** : raccourci de l'étape de faisabilité.
+- **Contournement** : déplacés (sans re-téléchargement) dans `data/raw/eea/`. Bronze EEA = la période d'étude ± 1 jour (marge pour le décalage d'horloge), valeurs et drapeaux inchangés. Politique de rétention : les bruts Sensor.Community, DWD et Météo-France sont supprimés après conversion validée ; les bruts EEA (≈ 0,8 Go) sont gardés car la découverte les relit.
+- **Impact** : couches conformes à l'architecture médaillon ; disque final ≈ bronze + 0,8 Go.
+
+### [2026-10-14] Instantané live figé pour que l'inventaire soit reproductible
+- **Constat** : la découverte écartait les capteurs que l'API live place *aujourd'hui* hors d'Allemagne et de France ; relancée un autre jour, elle aurait pris un autre instantané.
+- **Pourquoi** : l'instantané était mis en cache sous le nom du jour.
+- **Contournement** : le premier instantané pris (13/10/2026) est réutilisé par toutes les exécutions suivantes.
+- **Impact** : `make data` refait exactement le même plan, quel que soit le jour.
+
+### [2026-10-14] DWD : liste des stations à largeur fixe, en Latin-1, avec une colonne parfois vide
+- **Constat** : `TU_Stundenwerte_Beschreibung_Stationen.txt` est un texte à colonnes de largeur fixe, encodé en Latin-1 (« Großenkneten », « Säckingen, Bad (Bergseestr.) ») ; 16 lignes sur 668 n'ont pas la dernière colonne (licence). Les valeurs manquantes valent `-999` ; `MESS_DATUM` est au format `AAAAMMJJHH`, « Stundenwerte in UTC » selon les métadonnées. Le dossier `historical/` contient 2024 et 2025 complets (fichiers jusqu'au 31/12/2025).
+- **Pourquoi** : format historique du service météo allemand.
+- **Contournement** : expression régulière tolérante (colonne licence optionnelle), testée sur des lignes copiées du vrai fichier ; sentinelles `-999` gardées en bronze et converties en manquant en silver.
+- **Impact** : 668 stations lues, aucune perdue ; 222 stations DWD retenues (2 plus proches de chacune des 240 stations allemandes, ≤ 30 km).
+
+### [2026-10-14] Météo-France : un fichier par département, et beaucoup de stations sans humidité
+- **Constat** : les données horaires sont publiées par **département** et par période (`H_67_previous-2020-2024.csv.gz`, `H_67_latest-2025-2026.csv.gz`), 200 colonnes. Pour les 58 stations françaises appariées, il faut 59 départements, soit **118 fichiers et ≈ 2,0 Go** compressés, alors qu'on n'en garde que quelques stations. À Paris, 2 stations sur 6 seulement mesurent l'humidité. La Corse est le département `20` (et non `2A`/`2B`). Les noms de fichiers changent d'une année sur l'autre. Le fichier 2025–2026 contient des valeurs seulement « filtrées » (code qualité 9), pas encore validées.
+- **Pourquoi** : organisation de la publication ouverte de Météo-France (pas de liste des stations, pas de fichier par station).
+- **Contournement** : URL lues dans l'API data.gouv.fr par le titre de la ressource (robuste au changement de nom) ; départements repérés par les centres des ≈ 35 000 communes (un seul appel à geo.api.gouv.fr) situés à moins de 30 km d'une station ; colonnes réduites à l'identité de la station, `T`, `U` et leurs codes qualité ; les 2 stations **ayant de l'humidité** les plus proches sont gardées, puis les bruts sont supprimés.
+- **Impact** : 2 Go de pic de disque temporaire pour quelques Mo utiles ; les codes qualité sont conservés pour que silver puisse écarter les valeurs douteuses (code 2).
+
+### [2026-10-14] Même les stations officielles mesurent 100 % d'humidité
+- **Constat** : à la station DWD de Großenkneten, **9,6 %** des heures de 2024–2025 sont à ≥ 99,9 %. Sur l'échantillon de janvier 2025, 2 % des heures DWD et 5 % des heures Météo-France sont saturées, contre **48 % (BME280) et 55 % (DHT22)** des mesures des sondes citoyennes. Sur le volume complet 2024–2025 : 1,7 % des heures DWD et 2,8 % des heures Météo-France, contre 30,5 % (BME280) et 53,5 % (DHT22).
+- **Pourquoi** : le brouillard et la rosée sont réels ; une humidité de 100 % n'est pas forcément une panne. Ce qui trahit la sonde, c'est d'être à 100 % *quand la station officielle voisine ne l'est pas*.
+- **Contournement** : la règle de l'étape 3 reste « humidité saturée ou figée = manquante, jamais une vraie valeur » pour la **sonde** ; l'humidité officielle prend le relais, y compris quand elle vaut 100 %. La correction κ-Köhler n'est jamais appliquée à une humidité saturée ni au-dessus de 95 % (`physics.rh_max_pct`), quelle que soit la source.
+- **Impact** : l'humidité officielle n'est pas « meilleure » en brouillard, elle est seulement *vraie* ; ces heures seront peu corrigeables par la physique, et le modèle devra s'appuyer sur d'autres variables.
+
+### [2026-10-14] Le contrat Pandera n'était pas strict (bug de configuration)
+- **Constat** : le schéma imprimé dans le notebook 02 affichait `strict=False` alors que le code demandait `strict = True`.
+- **Pourquoi** : les options étaient déclarées dans une classe `_Strict` héritée par chaque `Config` ; Pandera ne lit que les attributs déclarés dans la classe `Config` elle-même.
+- **Contournement** : `strict = True` et `coerce = False` écrits dans chaque `Config` ; un test vérifie que les cinq contrats sont stricts et rejettent une colonne en trop, un type faux et un identifiant manquant.
+- **Impact** : aucune donnée fausse n'était passée (les tables sont construites avec la liste exacte de colonnes), mais le garde-fou ne fonctionnait pas. Toute la couche bronze complète a été validée avec les contrats corrigés.
+
+### [2026-10-14] Le mode `--sample` téléchargeait des fichiers météo de 5 ans
+- **Constat** : un premier essai `--sample` (20 capteurs, 1 mois) a téléchargé 613 Mo de fichiers Météo-France, dont le fichier 2020–2024.
+- **Pourquoi** : l'échantillon réduisait les capteurs mais pas la période.
+- **Contournement** : `Settings.for_sample()` réduit aussi la période au mois de l'échantillon (`sample.month`) ; tout le code en aval (choix des fichiers, filtres bronze) suit automatiquement.
+- **Impact** : l'échantillon complet tient en ≈ 20 s de téléchargement et 162 Mo de bruts temporaires.
+
+### [2026-10-14] Bilan du téléchargement complet : 0 échec, 3 h 04, pic de disque ≈ 11 Go
+- **Constat** : 45 337 unités capteur × mois (25 326 PM, 20 011 sondes d'humidité) ; 1 354 007 fichiers capteur-jour demandés, 1 208 730 reçus (5,85 Go gzip), **10,7 % absents (404)** ; EEA 582 fichiers (814 Mo), DWD 222 zips (343 Mo), Météo-France 118 fichiers (2,0 Go). **Aucun échec**, ni au téléchargement ni à la conversion. Durée : 3 h 04 de téléchargement (≈ 123 requêtes/s pour Sensor.Community), 12 min 35 s de conversion bronze, 40 s pour les dates d'enregistrement.
+- **Pourquoi** : les 404 sont attendus : la fenêtre d'activité est estimée à ± 1 mois près et les capteurs ont des pannes.
+- **Contournement** : aucun nécessaire ; les manifestes permettent de relancer sans rien refaire (testé sur les 57 unités rejouées, voir l'entrée « virgule décimale »).
+- **Impact** : pic de disque ≈ 11 Go (bruts complets), sous le budget de 20 Go ; état final **5,9 Go** (bronze 5,0 Go, bruts EEA 0,84 Go, le reste < 0,1 Go). 667,7 millions de lignes en bronze.
+
+### [2026-10-14] Certains firmwares écrivent une virgule décimale
+- **Constat** : le contrat bronze comptait ≈ 115 000 textes non convertis dans 57 unités. Les capteurs 96465 (SDS011) et 96466 (BME280), fin 2025, écrivent `0,8;;;0,5` à côté de `16;;;4,7` : une **virgule décimale** ; ces valeurs étaient mises à vide.
+- **Pourquoi** : notre lecture ne connaissait que le point décimal ; le firmware ou la passerelle de ces capteurs formate les nombres à la française ou à l'allemande.
+- **Contournement** : `bronze_frame` remplace la virgule par un point dans les colonnes numériques, compte ces valeurs (`decimal_commas`) et un test reprend les lignes réelles. Les 57 unités ont été marquées « à refaire » dans les deux manifestes (avec la raison), retéléchargées et reconverties en 25 s. Restent ≈ 21 700 textes réellement non numériques (`unavailable`, `unknown`, capteurs 33088/33089), mis à vide et comptés.
+- **Impact** : 92 818 mesures récupérées. Sans le compteur d'audit de bronze, ces capteurs auraient semblé « en panne » sur trois mois.
+
+### [2026-10-14] `NaN` n'est pas un vide, et Polars le trouve plus grand que 100
+- **Constat** : 1,93 million de mesures d'humidité BME280 valent `NaN` (le texte `nan` dans le CSV), distinct d'une valeur vide. Dans Polars, `NaN >= 99.9` est **vrai** (NaN est classé au-dessus de tous les nombres) : la saturation BME280 était surestimée de 1,7 point.
+- **Pourquoi** : la sonde renvoie « pas un nombre » quand la lecture échoue ; Polars suit un ordre total où NaN est le plus grand.
+- **Contournement** : `is_saturated` et `reading_status` traitent explicitement `NaN` comme manquant ; `kohler_growth_factor` refuse aussi `NaN` ; tests ajoutés.
+- **Impact** : piège à retenir pour toutes les couches : toute comparaison sur une colonne flottante doit exclure `NaN`.
+
+### [2026-10-14] Humidité figée : DHT22 bloquées à 1,0 %, BME280 à 0 %, HTU21D aux bornes de leur formule
+- **Constat** : 11,2 millions de mesures DHT22 valent **exactement 1,0 %** (166 sondes, 6,7 % des mesures DHT22) ; 0,94 million de mesures BME280 valent exactement 0 % (63 sondes ; sur ces lignes, température moyenne −33 °C et pression 303 hPa) ; HTU21D bloquées à 118,99 % ou −6 % (4 sondes sur 5) ; BME280 à 255 ou 655,35. Les stations officielles, elles, ne mesurent moins de 5 % que **9 heures sur 5,27 millions**.
+- **Pourquoi** : composant bloqué ou ne répondant plus : la DHT22 renvoie son plancher, la BME280 des registres vides, la HTU21D les deux bornes de sa formule de conversion (−6 + 125 × x), la BME280 un débordement d'entier.
+- **Contournement** : chaque mesure reçoit un statut (`transform/humidity.py`, `reading_status`) : manquante (vide ou `NaN`), hors bornes (< 0 ou > 100 %), **figée basse** (< `humidity.floor_pct` = 5 %), **saturée** (≥ 99,9 %), utilisable. Seule la dernière est une mesure ; la règle de l'étape 3 « saturée ou figée = manquante » s'applique aux trois défauts.
+- **Impact** : part des mesures utilisables : **DHT22 39,7 %**, BME280 68,6 %, HTU21D 55,1 %, SHT30/31/85 91–99 %. Les sondes Sensirion sont fiables mais rares (21 sondes sur 1 127). Une humidité constante sur plusieurs heures à l'intérieur de la plage plausible (1,6 % des heures DHT22) sera traitée à l'étape 3.
+
+### [2026-10-14] Saturation de l'humidité sur 2024–2025 : par type, par mois, selon l'âge
+- **Constat** : mesures ≥ 99,9 % : **DHT22 53,5 %**, **BME280 30,5 %**, SHT31 8,7 %, SHT30 1,5 %, SHT85 0,6 %. Elle suit la saison humide : DHT22 ≈ 66 % d'octobre à décembre 2024 contre 35 % en mai 2025, BME280 ≈ 43–49 % en hiver contre 19–25 % au printemps. Les stations officielles voisines ne dépassent jamais 9 % (Météo-France, novembre 2024 ; 1,7 % des heures DWD et 2,8 % des heures Météo-France sur la période). Selon l'âge de la sonde, la part de mois « morts » (voir l'entrée suivante) passe pour la DHT22 de 47–50 % la première année à **75–78 % après 4 ans**, et pour la BME280 de **19 %** la première année à 40–49 % ensuite.
+- **Pourquoi** : les sondes se mouillent par temps humide (l'humidité officielle médiane est de 85 % quand elles saturent) et ne sèchent plus ; avec les années, le capteur capacitif se dégrade.
+- **Contournement** : âge estimé par l'identifiant du capteur (courbe d'enregistrement tirée de 16 listings d'archive, toutes les sondes datées) ; l'âge pourra servir de variable.
+- **Impact** : l'échantillon d'un seul mois (janvier) surestimait la saturation (48 % BME280) : la réalité est saisonnière. L'humidité officielle sera la règle plutôt que l'exception, surtout en hiver et pour les vieilles DHT22.
+
+### [2026-10-14] Sondes « mortes » ou défauts épisodiques : seuil X = 0,3
+- **Constat** : pour chaque mois-sonde, $s_{\text{mois}}$ = part des heures en défaut (plus de la moitié des mesures de l'heure non utilisables). Sur 18 744 mois-sondes, 24 % n'ont aucune heure en défaut et 27,8 % en ont plus de 90 % ; la distribution n'est **pas** nettement en deux blocs (contrairement à l'échantillon), son creux est entre 10 et 50 %. Contre la station officielle, les heures utilisables des mois où $0 < s_{\text{mois}} < 0{,}3$ sont crédibles (BME280 : biais médian −2,3 à +1,0 point, corrélation 0,82–0,83), mais dès 0,3 le biais grimpe (DHT22 +13,8 points puis +21,9 dans la tranche 0,5–0,6 ; BME280 +2,7 puis +5,7) et la corrélation DHT22 tombe sous 0,4.
+- **Pourquoi** : une sonde qui commence à mourir ne se contente pas de saturer : même ses valeurs « normales » dérivent vers le haut.
+- **Contournement** : `humidity.dead_month_share = 0.3` : au-delà, tout le mois est « sans humidité locale fiable » ; en dessous, seules les heures en défaut sont écartées. Sensibilité chiffrée dans le notebook 02 (part récupérable de 32,6 % à X = 0,1 à 47,4 % à X = 0,7).
+- **Impact** : répartition des 1 126 sondes ayant des mesures : **DHT22** 118 saines, 141 mortes certains mois, **368 mortes toute la période (59 %)** ; **BME280** 150 saines, 230 mortes certains mois, 93 mortes toute la période (20 %) ; Sensirion 15 saines sur 21, aucune morte toute la période. Heures : 11,99 millions avec une mesure, 7,10 M perdues dans les mois morts, 0,22 M écartées comme défauts épisodiques, **4,66 M récupérables (38,9 %)** ; avec X = 0,5 on en garderait 43,4 %, au prix de 0,54 M d'heures douteuses.
+
+### [2026-10-14] Preuve : quand la sonde sature, l'air ne l'est presque jamais
+- **Constat** : sur 11,5 millions d'heures sonde ↔ station météo officielle de rang 1, 5,11 millions sont des heures où la sonde est saturée. La station officielle n'est alors saturée que **2,1 %** du temps ; elle mesure moins de 90 % dans **63 %** des cas, moins de 80 % dans 35 % ; médiane 85 %. Figure `reports/figures/02_saturation_vs_officiel.png`.
+- **Pourquoi** : c'est une panne de sonde, pas du brouillard.
+- **Contournement** : règle de l'étape 3 confirmée : humidité saturée ou figée = manquante, humidité officielle en secours.
+- **Impact** : utiliser l'humidité de la sonde sans ce filtre aurait injecté 100 % d'humidité dans plus de la moitié des heures, et la correction κ-Köhler aurait divisé les particules par un facteur qui diverge.
+
+### [2026-10-14] Même une sonde « saine » lit trop sec
+- **Constat** : dans les mois-sondes **sans aucune** heure en défaut, l'humidité de la sonde est en médiane **13 points sous** l'humidité officielle pour la BME280 (corrélation 0,68) et 9,6 points sous pour la DHT22 (corrélation 0,52).
+- **Pourquoi** : probablement l'échauffement du boîtier par l'électronique et le capteur de particules (une température plus haute donne une humidité relative plus basse), et des sondes montées près d'un mur ou sous un toit ; la DHT22 est en plus peu précise.
+- **Contournement** : aucun en bronze ; l'humidité locale « fiable » n'est pas forcément *juste*. L'étape 5 comparera trois variantes : humidité locale seule, officielle seule, et locale corrigée par l'officielle.
+- **Impact** : le drapeau « humidité locale fiable » dit « pas en panne », pas « exacte » ; la variable humidité du modèle sera choisie sur les résultats.
+
+### [2026-10-14] Humidité de secours : distance capteur ↔ station météo, une variable et une limite
+- **Constat** : toutes les paires ont au moins une station météo officielle à moins de 30 km de leur station EEA. Distance capteur → station météo de rang 1 : médiane **6,4 km** (DWD) et **6,5 km** (Météo-France), 90 % des paires sous 12,8 km et 9,2 km, maximum 26,7 km. Pour **70 paires**, la station de rang 2 est plus proche du capteur que celle de rang 1.
+- **Pourquoi** : les stations météo sont choisies par leur distance à la station EEA (pour être communes à tous les capteurs d'une station), mais le capteur peut être jusqu'à 3 km plus loin. L'humidité relative varie peu sur quelques dizaines de km en plaine, mais pas nulle part : relief, cours d'eau, îlot de chaleur urbain.
+- **Contournement** : `bronze/reference/pair_weather.parquet` garde, pour chaque paire, les deux stations météo avec leur distance au capteur et à la station EEA ; la distance capteur ↔ station météo deviendra une variable du modèle, et silver pourra prendre la station la plus proche du capteur quand les deux ont des données.
+- **Impact** : limite à documenter dans les résultats : l'erreur du modèle sera aussi rapportée selon cette distance.
+
+### [2026-10-14] Horloge des stations météo : UTC vérifié, et un premier test trompeur
+- **Constat** : corrélation décalée (pas de 10 min) entre la température officielle et celle des sondes des capteurs (horloge UTC vérifiée). Un premier essai sur 12 sondes et 2 mois donnait pour Météo-France +70 min en janvier et +30 min en juillet, ce qui ressemblait à un problème d'horloge. Refait sur 4 mois × 2 ans, sondes à moins de 12 km, mois avec r > 0,85 : décalage médian DWD −10 / 0 min, Météo-France +20 / +20 min (hiver / été), et surtout un écart hiver − été, sonde par sonde, de **0 min** (Météo-France, 25 sondes) et **5 min** (DWD, 15 sondes).
+- **Pourquoi** : une horloge en heure légale ferait sauter le décalage d'une heure entre l'hiver et l'été ; il ne saute pas. Les +20 min de Météo-France viennent probablement de la façon dont la valeur horaire est mesurée et de l'inertie du boîtier des sondes. Le premier essai avait trop peu de sondes.
+- **Contournement** : test robuste intégré au notebook 02 (section 6.1) ; `time_utc` des deux services utilisé tel quel.
+- **Impact** : pas de correction d'horloge pour la météo. Leçon de méthode : ne pas conclure sur une poignée de sondes.
+
+### [2026-10-14] Capteurs déplacés, dont un qui était au Viêt Nam
+- **Constat** : 65 capteurs PM sur 1 399 ont plusieurs positions dans la période : 23 de moins de 100 m (coordonnées corrigées), 21 de 0,1 à 3 km, **21 de plus de 3 km**. Le capteur 84804 était **à Hanoï** jusqu'au 5 septembre 2025 avant d'être installé à Magdebourg ; le 36947 a eu pendant 11 heures une position en Russie (erreur de saisie probable).
+- **Pourquoi** : les capteurs citoyens sont déménagés, prêtés, reconfigurés ; la position est celle déclarée par le propriétaire.
+- **Contournement** : la paire a été calculée sur la position la plus récente ; l'étape 3 découpera les mesures par position (`transform/positions.py`) et ne gardera que les périodes où le capteur est à portée de sa station.
+- **Impact** : sans ce découpage, 20 mois de pollution d'Hanoï auraient été comparés à une station de Magdebourg.
+
+### [2026-10-14] `sensor_type` en majuscules dans le contenu, en minuscules dans les noms de fichiers
+- **Constat** : les fichiers s'appellent `…_sds011_sensor_…csv.gz`, mais la colonne `sensor_type` contient `SDS011`, `DHT22`, `BME280`.
+- **Pourquoi** : conventions différentes entre l'archive et le firmware.
+- **Contournement** : bronze garde le contenu tel quel ; silver normalisera en minuscules (comme les tables de référence).
+- **Impact** : nul si on le sait ; une jointure naïve sur `sensor_type` aurait tout perdu.

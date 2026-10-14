@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import io
 import zipfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -126,15 +126,29 @@ async def download_parquet(client: PoliteClient, url: str, dest: Path) -> Path:
     return dest
 
 
+def raw_path(raw_root: Path, pollutant: str, country: str, sampling_point: str) -> Path:
+    return raw_root / "eea" / pollutant / country / f"{sampling_point}.parquet"
+
+
+def bronze_path(bronze_root: Path, pollutant: str, country: str, sampling_point: str) -> Path:
+    return bronze_root / "eea" / pollutant / country / f"{sampling_point}.parquet"
+
+
 def scan_observations(paths: list[Path] | Path) -> pl.LazyFrame:
-    """Lazily read EEA observation files with analysis-friendly names and types."""
+    """Lazily read EEA observation files with analysis-friendly names and types.
+
+    Timestamps go from ns to µs (the project-wide unit, lossless for hours) and
+    the ``Decimal(38, 18)`` value becomes a float. ``DataCapture`` (always empty),
+    ``ResultTime`` and ``FkObservationLog`` (bookkeeping) are not carried over.
+    """
     return pl.scan_parquet(paths).select(
         sampling_point=pl.col("Samplingpoint").str.split("/").list.last(),
         pollutant=pl.col("Pollutant"),
-        start=pl.col("Start"),
-        end=pl.col("End"),
+        start=pl.col("Start").cast(pl.Datetime("us")),
+        end=pl.col("End").cast(pl.Datetime("us")),
         value=pl.col("Value").cast(pl.Float64),
         unit=pl.col("Unit"),
+        agg_type=pl.col("AggType"),
         validity=pl.col("Validity"),
         verification=pl.col("Verification"),
     )
@@ -152,3 +166,15 @@ def monthly_valid_hours(lf: pl.LazyFrame, cfg: Eea, start: date, end: date) -> p
         .group_by("sampling_point", month=pl.col("start").dt.truncate("1mo").dt.date())
         .agg(valid_hours=pl.len())
     )
+
+
+def bronze_frame(lf: pl.LazyFrame, start: date, end: date, margin_days: int) -> pl.LazyFrame:
+    """Rows of the study period (plus a margin for the clock shift), values unchanged.
+
+    ``Start`` is still on the station clock here (UTC+1 for Germany, see the
+    journal): the margin keeps the hours that move across the period bounds
+    once converted to UTC in silver. Sentinels (-999) and flags are kept.
+    """
+    lo = start - timedelta(days=margin_days)
+    hi = end + timedelta(days=margin_days)
+    return lf.filter(pl.col("start").dt.date().is_between(lo, hi)).sort("start")

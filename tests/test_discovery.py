@@ -76,33 +76,38 @@ def _fixture():
     )
     stations = pl.DataFrame(
         {
-            "sampling_point": ["A1", "A2"],
-            "station_code": ["DEXX001", "DEXX001"],  # two instruments at one station
-            "country": ["DE", "DE"],
-            "station_type": ["background", "background"],
-            "station_area": ["urban", "urban"],
-            "lat": [50.0, 50.0],
-            "lon": [8.0, 8.0],
+            "sampling_point": ["A1", "A2", "B1", "C1"],
+            # A1/A2: two instruments at one station; B: 2.2 km north of A;
+            # C: closest to sensor 20 but without any verified hour.
+            "station_code": ["DEXX001", "DEXX001", "DEXX002", "DEXX003"],
+            "country": ["DE"] * 4,
+            "station_type": ["background", "background", "traffic", "traffic"],
+            "station_area": ["urban"] * 4,
+            "lat": [50.0, 50.0, 50.02, 50.005],
+            "lon": [8.0, 8.0, 8.0, 8.001],
         }
     )
     availability = pl.DataFrame(
         {
-            "sampling_point": ["A1", "A1", "A1", "A2"],
-            "month": [jan, feb, mar, jan],
-            "valid_hours": [700, 600, 500, 10],
+            "sampling_point": ["A1", "A1", "A1", "A2", "B1", "B1", "B1", "C1"],
+            "month": [jan, feb, mar, jan, jan, feb, mar, jan],
+            "valid_hours": [700, 600, 500, 10, 744, 696, 744, 0],
         },
         schema_overrides={"valid_hours": pl.UInt32},
     )
     return listings, positions, stations, availability
 
 
-def test_pair_table_overlap_humidity_and_station_dedup():
+def test_pair_table_keeps_one_nearest_usable_station_per_sensor():
     listings, positions, stations, availability = _fixture()
     inventory = sensor_inventory(listings, positions, get_settings())
     pairs = pair_table(inventory, stations, availability, max_km=3.0).sort("sensor_id")
-    # Indoor sensor 30 is gone, the weaker sampling point A2 is dropped.
+    # Indoor sensor 30 is gone; each remaining sensor appears exactly once.
     assert pairs["sensor_id"].to_list() == [10, 20]
-    assert set(pairs["sampling_point"]) == {"A1"}
+    # A2 (weaker instrument of station A) is dropped; B is farther than A for both
+    # sensors; C is the closest to sensor 20 but has no verified hour → skipped.
+    assert pairs["sampling_point"].to_list() == ["A1", "A1"]
+    assert pairs["n_stations_within"].to_list() == [2, 2]
     # Sensor 10 active Jan+Feb → 700 + 600 h; sensor 20 active March → 500 h.
     assert pairs["overlap_hours"].to_list() == [1300, 500]
     assert pairs["has_humidity"].to_list() == [True, True]
@@ -115,5 +120,5 @@ def test_feasibility_summary_counts_by_radius():
     small = summary.filter(pl.col("radius_km") == 0.1).row(0, named=True)
     large = summary.filter(pl.col("radius_km") == 1.0).row(0, named=True)
     assert (small["n_pairs"], small["n_stations"]) == (1, 1)  # sensor 20 is ~556 m away
-    assert (large["n_pairs"], large["n_sensors"]) == (2, 2)
+    assert (large["n_pairs"], large["n_sensors"], large["n_stations"]) == (2, 2, 1)
     assert large["total_overlap_h"] == 1800
