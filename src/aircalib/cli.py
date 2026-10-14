@@ -70,16 +70,16 @@ def bronze(sample: SampleOpt = False) -> None:
 
 @app.command()
 def silver(sample: SampleOpt = False) -> None:
-    """Step 3a: flag every reading and hour (no row deleted), aggregate each source to UTC hours."""
+    """Step 3a: segments and their stations, then a status per reading and hour, hourly aggregation."""
     settings = _settings(sample)
     silver_stage.run(settings, plan.load_plan(settings))
 
 
 @app.command()
 def pair(sample: SampleOpt = False) -> None:
-    """Step 3b: pair position segments with stations, join sources, check clocks, write the funnel."""
+    """Step 3b: join every pair-hour with its sources, check clocks, write the funnel report."""
     settings = _settings(sample)
-    pair_stage.build(settings, plan.load_plan(settings))
+    pair_stage.build(settings)
     console.print(f"funnel: {silver_report.write(settings)}")
 
 

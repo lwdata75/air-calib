@@ -316,3 +316,45 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : garder un statut par mesure double le volume des mesures brutes.
 - **Contournement** : à l'étape 5, la couche gold ne gardera que les colonnes utiles des heures-paires `ok` ; si besoin, les bruts EEA (relus seulement par la découverte) pourront être supprimés.
 - **Impact** : budget à surveiller ; pic du calcul silver sous 11 Go, loin des 20 Go.
+
+### [2026-10-14] Décision : les stations TEOM sont gardées, la méthode de mesure devient une colonne
+- **Constat** : 5 des 7 stations signalées par le contrôle d'horloge mesurent avec un TEOM ; leur décalage (+1 h, corrélation répartie entre 0 et +1 h, identique hiver comme été) est la réponse retardée de l'instrument, pas une horloge fausse. À l'étape 4, leurs paires valent les paires vérifiées (R² médian 0,59, 41 % passent les cibles EPA en journalier).
+- **Pourquoi** : la microbalance TEOM rend une valeur lissée et décalée d'environ une demi-heure.
+- **Contournement** : `method_class` (optique, néphélomètre + bêta, bêta, TEOM, inconnue), tirée du champ « Measurement Method » de l'EEA (`eea.method_classes`), est portée par chaque paire ; un décalage expliqué par la méthode (`clock.instrument_lag_h: {teom: 1}`) devient `instrument_lag` et la paire est **gardée**. DEBY099 et DEMV007, inexpliquées, restent exclues.
+- **Impact** : +544 000 heures-paires utilisables (13,28 → 13,82 M) ; la méthode sert de variable et d'axe de lecture des résultats.
+
+### [2026-10-14] La règle « valeurs figées ≥ 1 h » visait trop l'air propre : révisée
+- **Constat** : sur les heures couvertes par un plateau d'au moins une heure, 36,9 % ont une valeur EEA sous 5 µg/m³ (14,7 % sous 3), contre 29,7 % (11,1 %) pour les heures gardées : les heures propres étaient sur-représentées.
+- **Pourquoi** : en air calme et propre, un SDS011 (résolution 0,1 µg/m³) peut légitimement répéter 0,3 ou 0,5 µg/m³ pendant une heure.
+- **Contournement** : un plateau ≥ 1 h n'est « figé » que si c'est un **code de panne connu** (0/0 ; −1 et 999,9 sont déjà écartés par les règles précédentes, `particles.stuck_codes`) **ou** si la station de référence a varié d'au moins 5 µg/m³ pendant ce temps (`particles.stuck_reference_range_ugm3`, même borne que le bruit des analyseurs). Pour l'appliquer, les segments et leurs stations sont désormais calculés **avant** le marquage des mesures (`silver/segments.py`).
+- **Impact** : 12 163 plateaux en air calme (0,51 M mesures, 42 % sous 5 µg/m³) sont gardés ; les 746 plateaux « la station a varié » ont la distribution des heures gardées (31 % sous 5 µg/m³). Les plateaux 0/0 restent figés et penchent encore un peu vers l'air propre (36 %), mais la station mesure alors 6,3 µg/m³ en médiane : le capteur ne voit plus rien. Mesures figées : 3,07 → 2,56 M.
+
+### [2026-10-14] Disque : le statut en `Enum` ne fait rien gagner, la suppression des bruts EEA oui
+- **Constat** : la colonne `quality_flag` pèse 1,0 Mo sur 2,82 Go de mesures (0,04 %), en `Categorical` comme en `Enum` : Parquet la stocke déjà sous forme de dictionnaire. Le volume vient de l'horodatage (1,48 Go) et des valeurs PM10/PM2.5 (1,34 Go).
+- **Pourquoi** : codage par dictionnaire et compression zstd de Parquet.
+- **Contournement** : `quality_flag` et le `status` des heures-paires sont tout de même des `pl.Enum` (liste fermée : un statut inconnu ne peut pas être écrit). Les bruts EEA sont supprimés une fois en bronze (`eea.keep_raw: false`) ; la découverte réutilise sa table de disponibilité mise en cache dans `data/meta` au lieu de relire les bruts, et le téléchargement saute les points déjà convertis. Le notebook 01 retélécharge à la volée le seul fichier brut qu'il montre.
+- **Impact** : `data/` passe de **10,28 à 9,43 Go** (bruts EEA 858 Mo → 0,2 Mo) ; mesures silver 2,76 → 2,76 Go (inchangé).
+
+### [2026-10-14] Le « avant » : sans correction, 20 % des paires allemandes passent les cibles EPA en horaire
+- **Constat** : cibles EPA (R² ≥ 0,70, pente 1 ± 0,35, ordonnée −5 à +5 µg/m³, RMSE ≤ 7 µg/m³), capteur brut régressé sur la référence : **Allemagne 19,9 % des paires en horaire, 32,3 % en journalier ; France 11,8 % et 17,9 %**. Sans les paires à l'horloge invérifiable : 23,7 % / 38,0 % (DE), 15,8 % / 24,2 % (FR). La pente est la cible la plus manquée (médiane ≈ 0,58 : le capteur voit environ 60 % de la référence).
+- **Pourquoi** : le SDS011 sous-estime les fines particules en air sec (ses tailles et son étalonnage ne sont pas ceux des instruments de référence) ; le bruit horaire pénalise le R².
+- **Contournement** : aucun ; c'est le point de départ chiffré du README et la référence de l'étape 7.
+- **Impact** : le modèle sera jugé sur la part de paires qu'il fait passer de l'autre côté, en horaire et en journalier.
+
+### [2026-10-14] L'humidité explique l'essentiel du biais ; l'erreur est multiplicative
+- **Constat** : le rapport médian capteur / référence passe de 0,42 (humidité officielle < 50 %) à 0,79 (≥ 95 %) en Allemagne, à chaque saison. Il reste entre 0,5 et 0,6 à tous les niveaux de pollution, alors que l'erreur absolue médiane passe de −1,5 µg/m³ (< 5 µg/m³) à −29 µg/m³ (≥ 50 µg/m³) ; la dispersion relative (écart-type du log du rapport) reste stable (0,76–0,94).
+- **Pourquoi** : la croissance hygroscopique fait « rattraper » la référence en air humide ; un capteur qui lit une fraction à peu près fixe de la référence produit une erreur proportionnelle au niveau.
+- **Contournement** : proposition pour l'étape 6 : modéliser en échelle log (ln référence en fonction de ln capteur, humidité…), à comparer à l'échelle µg/m³ sur les mêmes plis.
+- **Impact** : en µg/m³, quelques heures polluées domineraient l'erreur quadratique (RMSE souvent plusieurs fois la MAE).
+
+### [2026-10-14] Pas de dérive moyenne, mais des capteurs instables
+- **Constat** : pour 830 paires suivies deux ans, le rapport 2025 / 2024 a une médiane de 1,006, mais 28 % des paires changent de plus de 20 %. Les capteurs les plus anciens lisent un peu plus haut (0,61 après 6 ans contre 0,49 la première année) ; ceux de 4 à 6 ans ont la RMSE la plus forte.
+- **Pourquoi** : encrassement, changement d'installation, fin de vie du ventilateur ou du laser.
+- **Contournement** : l'âge du capteur devient une variable candidate ; l'étape 6 mesurera l'erreur sur 2025 d'un modèle appris sur 2024.
+- **Impact** : une correction figée dans le temps se dégradera pour une partie des capteurs ; limite à documenter.
+
+### [2026-10-14] Paires « invérifiables » : des capteurs qui ne suivent pas la référence
+- **Constat** : 235 paires invérifiables (≥ 500 h) ont un R² médian de 0,03, une pente médiane de 0,17 ; aucune ne passe les cibles EPA en horaire (1,8 % en journalier), contre 23,1 % et 36,8 % pour les paires vérifiées, à composition égale (bande, type de station, distance). Elles font 79 % des 10 % pires paires ; certains capteurs affichent 190 à 640 µg/m³ en moyenne pour 7 à 11 µg/m³ réels sans jamais violer une règle physique.
+- **Pourquoi** : capteurs défectueux (optique sale, ventilateur, électronique) dont les valeurs restent dans la plage du SDS011 ; le contrôle d'horloge, qui teste si les variations suivent la station, les détecte.
+- **Contournement** : gardées avec leur drapeau (décision du commanditaire) ; **recommandation** : les exclure de l'entraînement et les évaluer à part ; test avec et sans elles à l'étape 6.
+- **Impact** : avec elles, le « avant » perd 4 à 6 points (DE horaire 19,9 % contre 23,7 %).

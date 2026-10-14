@@ -1,6 +1,6 @@
 # Rapport d'ingestion — mode complet
 
-_Généré automatiquement le 2026-10-14 10:48 UTC à partir des manifestes._
+_Généré automatiquement le 2026-10-14 12:36 UTC à partir des manifestes._
 
 ## Sensor.Community (unités = capteur × mois)
 
@@ -24,6 +24,6 @@ _Généré automatiquement le 2026-10-14 10:48 UTC à partir des manifestes._
 
 | folder | gb |
 |---|---|
-| raw | 0.9 |
-| bronze | 5.3 |
-| meta | 0.0 |
+| raw | 0.011 |
+| bronze | 5.317 |
+| meta | 0.009 |

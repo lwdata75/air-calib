@@ -1,10 +1,8 @@
-"""Stage ``pair`` (silver, part 2): pair every position segment with a station and join the sources.
+"""Stage ``pair`` (silver, part 2): join every pair-hour with its sources and check clocks.
 
-1. **Segments → stations.** A sensor that moved is several *segments*; each segment is
-   paired on its own with the nearest usable station within ``pairing.radius_download_km``
-   (same rule as step 1). A moved sensor can change station or lose it. A pair is
-   ``(sensor, segment) → station``; ``cv_group`` (the station code) is the group of the
-   station-wise cross-validation: a station is never in training and test at once.
+1. **Segments → stations** come from the ``silver`` stage (``aircalib.silver.segments``):
+   a pair is ``(sensor, segment) → station`` with its distance band, measurement method
+   and ``cv_group`` (the station code, group of the station-wise cross-validation).
 2. **Official weather.** Among the two official stations kept for the EEA station, the
    one nearest to the *sensor* is the main one (tie within ``weather.tie_km`` broken by
    humidity completeness); an hour missing there falls back to the other station.
@@ -12,7 +10,9 @@
    humidity and temperature, the local probe humidity when it is reliable, and a
    ``status``: ``ok`` or the first rule it fails (``HOUR_RULES`` order = funnel order).
 4. **Clock check** on every pair and every station (``aircalib.transform.clock``): a pair
-   whose best lag is significantly not 0, or whose station's is, is excluded.
+   whose best lag is significantly not 0, or whose station's is, is excluded -- unless the
+   station's instrument is known to respond late (TEOM, ``clock.instrument_lag_h``): those
+   are flagged ``instrument_lag`` and kept.
 """
 
 from __future__ import annotations
@@ -21,93 +21,21 @@ import polars as pl
 
 from aircalib.config import Settings
 from aircalib.ingest.bronze import write_parquet_atomic
-from aircalib.ingest.plan import FAR, NEAR, Plan, reference_dir
+from aircalib.ingest.plan import reference_dir
 from aircalib.logging import get_logger
 from aircalib.schemas import silver as contracts
-from aircalib.silver.rules import (
-    NO_OFFICIAL_HUMIDITY,
-    NO_STATION,
-    NOT_DOWNLOADED,
-    REFERENCE_MISSING,
-    STATION_MISMATCH,
-)
+from aircalib.silver.rules import HOUR_RULES, NO_OFFICIAL_HUMIDITY, REFERENCE_MISSING, STATION_MISMATCH
+from aircalib.silver.segments import KEYS
 from aircalib.silver.sources import silver_dir
 from aircalib.transform import clock
 from aircalib.transform import particles as pt
 from aircalib.transform import reference as ref
 from aircalib.transform import weather as wx
-from aircalib.transform.pairing import nearest_usable_station, weather_links
+from aircalib.transform.pairing import weather_links
 
 log = get_logger(__name__)
 
-KEYS = ["sensor_id", "segment"]
-
-
-def pair_id(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(pair_id=pl.format("{}-{}", "sensor_id", "segment"))
-
-
-# ---------------------------------------------------------------- segments → stations
-def segment_pairs(settings: Settings, plan: Plan, segments: pl.DataFrame, eea: pl.DataFrame) -> pl.DataFrame:
-    """One row per segment with its station (or the reason it has none) and its distance band."""
-    meta = settings.paths.meta
-    stations = pl.read_parquet(meta / "eea_stations_pm25.parquet")
-    availability = pl.read_parquet(meta / "eea_pm25_monthly_valid_hours.parquet")
-    points = pair_id(segments).with_columns(
-        months=pl.date_ranges(
-            pl.col("start").dt.date().dt.truncate("1mo"), pl.col("end").dt.date().dt.truncate("1mo"), "1mo"
-        )
-    )
-    nearest = nearest_usable_station(
-        points.select("pair_id", "lat", "lon", "months"),
-        stations,
-        availability,
-        settings.pairing.radius_download_km,
-        point_id="pair_id",
-    ).select(
-        "pair_id",
-        "sampling_point",
-        "station_code",
-        "country",
-        "station_type",
-        "station_area",
-        "distance_km",
-        "n_stations_within",
-    )
-    downloaded = eea.filter(pl.col("pollutant") == "pm25")["sampling_point"].unique().implode()
-    sensor_country = plan.pairs.select("sensor_id", sensor_country="country")
-    out = (
-        points.drop("months")
-        .join(nearest, on="pair_id", how="left")
-        .join(sensor_country, on="sensor_id", how="left")
-        .with_columns(
-            country=pl.coalesce("country", "sensor_country"),
-            pair_status=pl.when(pl.col("sampling_point").is_null())
-            .then(pl.lit(NO_STATION))
-            .when(~pl.col("sampling_point").is_in(downloaded))
-            .then(pl.lit(NOT_DOWNLOADED))
-            .otherwise(pl.lit(pt.OK)),
-            distance_band=pl.when(pl.col("distance_km") <= settings.pairing.radius_train_km)
-            .then(pl.lit(NEAR))
-            .when(pl.col("distance_km").is_not_null())
-            .then(pl.lit(FAR)),
-            cv_group=pl.col("station_code"),
-        )
-        .drop("sensor_country")
-        .sort(KEYS)
-    )
-    planned = plan.pairs.select("sensor_id", planned_point="sampling_point")
-    changed = out.join(planned, on="sensor_id").filter(
-        pl.col("sampling_point").is_not_null() & (pl.col("sampling_point") != pl.col("planned_point"))
-    )
-    log.info(
-        "segments: %d (%d sensors moved), %d without station, %d paired with another station than planned",
-        out.height,
-        out.filter(pl.col("segment") > 1)["sensor_id"].n_unique(),
-        out.filter(pl.col("pair_status") != pt.OK).height,
-        changed.height,
-    )
-    return out
+STATUS_TYPE = pl.Enum([pt.OK, *HOUR_RULES])  # compact code; an unknown status cannot be written
 
 
 # ---------------------------------------------------------------------- weather choice
@@ -256,16 +184,15 @@ def _status() -> pl.Expr:
     )
 
 
-def build(settings: Settings, plan: Plan) -> dict[str, pl.DataFrame]:
+def build(settings: Settings) -> dict[str, pl.DataFrame]:
     silver = silver_dir(settings)
     sc = silver / "sensor_community"
     pm_hourly = pl.read_parquet(sc / "pm_hourly.parquet")
-    segments = pl.read_parquet(sc / "segments.parquet")
     probes = pl.read_parquet(sc / "humidity_hourly.parquet")
     eea = pl.read_parquet(silver / "eea" / "hourly.parquet")
     weather = pl.read_parquet(silver / "weather" / "hourly.parquet")
 
-    pairs = segment_pairs(settings, plan, segments, eea)
+    pairs = pl.read_parquet(silver / "pairs" / "segment_pairs.parquet")
     chosen = weather_choice(settings, pairs, weather)
     pm25, pm10 = _reference(eea)
     pair_cols = [
@@ -277,6 +204,8 @@ def build(settings: Settings, plan: Plan) -> dict[str, pl.DataFrame]:
         "country",
         "station_type",
         "station_area",
+        "measurement_method",
+        "method_class",
         "distance_km",
         "distance_band",
         "pair_status",
@@ -299,10 +228,23 @@ def build(settings: Settings, plan: Plan) -> dict[str, pl.DataFrame]:
     changes = clock.hourly_changes(checkable)
     cfg = settings.clock
     correlations = clock.lag_correlations(changes, cfg.max_lag_h)
-    clock_flags = clock.clock_status(correlations, cfg.min_hours, cfg.min_r, cfg.min_z)
+    methods = pairs.select("pair_id", "station_code", "method_class")
+    clock_flags = clock.instrument_lag(
+        clock.clock_status(correlations, cfg.min_hours, cfg.min_r, cfg.min_z).join(
+            methods.select("pair_id", "method_class"), on="pair_id", how="left"
+        ),
+        cfg.instrument_lag_h,
+    ).drop("method_class")
     station_correlations = clock.lag_correlations(changes, cfg.max_lag_h, group="station_code")
-    station_flags = clock.clock_status(
-        station_correlations, cfg.min_hours, cfg.min_r, cfg.min_z, group="station_code"
+    station_flags = clock.instrument_lag(
+        clock.clock_status(
+            station_correlations, cfg.min_hours, cfg.min_r, cfg.min_z, group="station_code"
+        ).join(
+            methods.select("station_code", "method_class").unique("station_code"),
+            on="station_code",
+            how="left",
+        ),
+        cfg.instrument_lag_h,
     )
     hours = (
         hours.join(clock_flags.select("pair_id", "clock_flag"), on="pair_id", how="left")
@@ -316,14 +258,13 @@ def build(settings: Settings, plan: Plan) -> dict[str, pl.DataFrame]:
     )
 
     out = silver / "pairs"
-    write_parquet_atomic(pairs, out / "segment_pairs.parquet")
     write_parquet_atomic(chosen, out / "weather_choice.parquet")
     write_parquet_atomic(correlations, out / "clock_correlations.parquet")
     write_parquet_atomic(clock_flags, out / "clock_check.parquet")
     write_parquet_atomic(station_correlations, out / "clock_station_correlations.parquet")
     write_parquet_atomic(station_flags, out / "clock_check_station.parquet")
     contracts.PairHours.validate(hours)
-    write_parquet_atomic(hours, out / "pair_hours.parquet")
+    write_parquet_atomic(hours.with_columns(pl.col("status").cast(STATUS_TYPE)), out / "pair_hours.parquet")
     log.info(
         "pair-hours: %d, usable %d; clock per pair: %s; per station: %s",
         hours.height,

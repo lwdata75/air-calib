@@ -10,7 +10,9 @@ Outputs under ``<layers>/silver``:
   ``segment`` and its ``quality_flag``;
 * ``sensor_community/pm_hourly.parquet``: per sensor, segment and hour: mean, median,
   standard deviation and number of valid readings, completeness, ``hour_flag``;
-* ``sensor_community/segments.parquet``: position segments of every sensor;
+* ``sensor_community/segments.parquet`` and ``pairs/segment_pairs.parquet``: position segments
+  of every sensor and their stations (``aircalib.silver.segments``), built before the particle
+  rules because the stuck-value rule looks at the paired station;
 * ``sensor_community/humidity_hourly.parquet`` and ``humidity_status.parquet``: probe
   hours with their reliability, and reading counts per status;
 * ``eea/hourly.parquet``: reference hours (PM2.5 and PM10) on UTC with their flag;
@@ -29,15 +31,18 @@ from aircalib.ingest.bronze import write_parquet_atomic
 from aircalib.ingest.plan import Plan
 from aircalib.logging import get_logger
 from aircalib.schemas import silver as contracts
+from aircalib.silver import segments as segment_stage
 from aircalib.transform import humidity as hum
 from aircalib.transform import particles as pt
 from aircalib.transform import reference as ref
 from aircalib.transform import weather as wx
-from aircalib.transform.positions import assign_segments, segment_table
+from aircalib.transform.positions import assign_segments
 
 log = get_logger(__name__)
 
 PM_COLUMNS = ["sensor_id", "segment", "timestamp", "P1", "P2", pt.FLAG]
+# Statuses are stored as a fixed enumeration: a compact code, and an unknown status cannot be written.
+PM_FLAG_TYPE = pl.Enum([pt.OK, *pt.RULES])
 SEGMENT_KEYS = ["sensor_id", "segment"]
 WORKERS = 4  # sensors processed in parallel (Polars itself is multi-threaded)
 
@@ -53,43 +58,66 @@ def _bronze_files(settings: Settings, kind: str, sensor_id: int) -> list[Path]:
 
 
 # ------------------------------------------------------------------------ particles
-def clean_pm_sensor(settings: Settings, sensor_id: int) -> tuple[pl.DataFrame, pl.DataFrame] | None:
-    """Flag one sensor's readings, cut them into segments, write them; return (hourly, segments)."""
+def clean_pm_sensor(settings: Settings, sensor_id: int, reference: pl.DataFrame) -> pl.DataFrame | None:
+    """Flag one sensor's readings (segments first), write them; return its hourly table.
+
+    ``reference``: valid hourly PM2.5 of the stations paired with this sensor's segments
+    (``sensor_id, segment, hour, reference``), used by the stuck-value rule.
+    """
     files = _bronze_files(settings, "pm", sensor_id)
     if not files:
         return None
-    readings = pl.read_parquet(files)
-    flagged = assign_segments(pt.flag_readings(readings, settings.particles))
+    readings = assign_segments(segment_stage.sorted_readings(pl.read_parquet(files)))
+    flagged = pt.flag_readings(readings, settings.particles, reference)
     dest = settings.paths.silver / "sensor_community" / "pm" / f"{sensor_id}.parquet"
     contracts.PmReadings.validate(flagged.select(PM_COLUMNS))
-    write_parquet_atomic(flagged.select(PM_COLUMNS).with_columns(pl.col(pt.FLAG).cast(pl.Categorical)), dest)
-    hourly = pt.hourly_particles(flagged, settings.particles, SEGMENT_KEYS).collect()
-    return hourly, segment_table(flagged).collect()
+    write_parquet_atomic(flagged.select(PM_COLUMNS).with_columns(pl.col(pt.FLAG).cast(PM_FLAG_TYPE)), dest)
+    return pt.hourly_particles(flagged, settings.particles, SEGMENT_KEYS).collect()
 
 
-def clean_particles(settings: Settings, plan: Plan) -> tuple[pl.DataFrame, pl.DataFrame]:
+def station_reference(pairs: pl.DataFrame, eea: pl.DataFrame) -> pl.DataFrame:
+    """Valid hourly PM2.5 of each segment's station: ``sensor_id, segment, hour, reference``."""
+    pm25 = eea.filter(pl.col("pollutant") == "pm25", pl.col("quality_flag") == ref.OK)
+    return (
+        pairs.filter(pl.col("pair_status") == pt.OK)
+        .select(*SEGMENT_KEYS, "sampling_point")
+        .join(pm25.select("sampling_point", "hour", reference="value"), on="sampling_point")
+        .drop("sampling_point")
+    )
+
+
+def clean_particles(settings: Settings, plan: Plan, pairs: pl.DataFrame, eea: pl.DataFrame) -> pl.DataFrame:
     ids = plan.pairs["sensor_id"].to_list()
-    hourly, segments = [], []
+    reference = station_reference(pairs, eea).partition_by("sensor_id", as_dict=True)
+    empty = pl.DataFrame(
+        schema={
+            "sensor_id": pl.Int64,
+            "segment": pl.UInt32,
+            "hour": pl.Datetime("us"),
+            "reference": pl.Float64,
+        }
+    )
+
+    def one(sensor_id: int) -> pl.DataFrame | None:
+        return clean_pm_sensor(settings, sensor_id, reference.get((sensor_id,), empty))
+
+    hourly = []
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        for i, result in enumerate(pool.map(lambda s: clean_pm_sensor(settings, s), ids), 1):
+        for i, result in enumerate(pool.map(one, ids), 1):
             if result is not None:
-                hourly.append(result[0])
-                segments.append(result[1])
+                hourly.append(result)
             if i % 200 == 0:
                 log.info("particles: %d/%d sensors", i, len(ids))
-    out = silver_dir(settings) / "sensor_community"
-    pm_hourly, segment_frame = pl.concat(hourly), pl.concat(segments)
+    pm_hourly = pl.concat(hourly)
     contracts.PmHourly.validate(pm_hourly)
-    write_parquet_atomic(pm_hourly, out / "pm_hourly.parquet")
-    write_parquet_atomic(segment_frame, out / "segments.parquet")
+    write_parquet_atomic(pm_hourly, silver_dir(settings) / "sensor_community" / "pm_hourly.parquet")
     log.info(
-        "particles: %d sensors, %d segments, %d sensor-hours (%d ok)",
-        segment_frame["sensor_id"].n_unique(),
-        segment_frame.height,
+        "particles: %d sensors, %d sensor-hours (%d ok)",
+        pm_hourly["sensor_id"].n_unique(),
         pm_hourly.height,
         pm_hourly.filter(pl.col("hour_flag") == pt.OK).height,
     )
-    return pm_hourly, segment_frame
+    return pm_hourly
 
 
 # ------------------------------------------------------------------------- humidity
@@ -194,7 +222,8 @@ def clean_weather(settings: Settings) -> pl.DataFrame:
 
 
 def run(settings: Settings, plan: Plan) -> None:
-    clean_reference(settings)
+    eea = clean_reference(settings)
     clean_weather(settings)
     clean_humidity(settings, plan)
-    clean_particles(settings, plan)
+    pairs = segment_stage.build(settings, plan, eea)
+    clean_particles(settings, plan, pairs, eea)

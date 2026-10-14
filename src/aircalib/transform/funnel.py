@@ -28,7 +28,8 @@ def funnel(
     Columns: ``step``, ``removed`` and ``remaining`` (rows), and for each entity
     ``<name>_lost`` (entities whose last row went at this step) and ``<name>_remaining``.
     """
-    unknown = set(frame.lazy().select(pl.col(status).unique()).collect()[status].to_list()) - {OK, *rules}
+    frame = frame.lazy().with_columns(pl.col(status).cast(pl.String))  # works for String, Enum, Categorical
+    unknown = set(frame.select(pl.col(status).unique()).collect()[status].to_list()) - {OK, *rules}
     if unknown:
         raise ValueError(f"statuses missing from the rule list: {sorted(unknown)}")
     order = {rule: i for i, rule in enumerate(rules)}

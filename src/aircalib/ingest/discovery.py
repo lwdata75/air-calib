@@ -585,9 +585,16 @@ async def run(settings: Settings, today: date) -> dict[str, pl.DataFrame]:
     outdoor_pm = inventory.filter(pl.col("kind") == "pm", ~pl.col("indoor"))
     near = pairs_within(outdoor_pm.select("sensor_id", "lat", "lon"), stations, max_km).collect()
     near_stations = stations.join(near.select("sampling_point").unique(), on="sampling_point")
-    files = await download_station_files(settings, near_stations, "pm25")
-    availability = station_availability(settings, files)
-    availability.write_parquet(meta / "eea_pm25_monthly_valid_hours.parquet")
+    availability_path = meta / "eea_pm25_monthly_valid_hours.parquet"
+    if availability_path.exists():
+        # The raw station files are temporary (deleted once in bronze); what discovery needs from
+        # them, the monthly valid hours, is cached here.
+        files = pl.DataFrame(schema={"sampling_point": pl.String, "path": pl.String, "bytes": pl.Int64})
+        availability = pl.read_parquet(availability_path)
+    else:
+        files = await download_station_files(settings, near_stations, "pm25")
+        availability = station_availability(settings, files)
+        availability.write_parquet(availability_path)
 
     pairs = pair_table(inventory, stations, availability, max_km)
     pairs.write_parquet(meta / "candidate_pairs.parquet")

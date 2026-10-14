@@ -19,7 +19,7 @@ OK = "ok"
 PM_STATUSES = [OK, *particles.RULES]
 HOUR_STATUSES = [OK, particles.NO_VALID_READING, particles.INCOMPLETE_HOUR]
 PAIR_STATUSES = [OK, *HOUR_RULES]
-CLOCK_STATUSES = [clock.OK, clock.MISMATCH, clock.UNVERIFIABLE]
+CLOCK_STATUSES = [clock.OK, clock.MISMATCH, clock.UNVERIFIABLE, clock.INSTRUMENT_LAG]
 PM_MAX = get_settings().particles.max_ugm3
 
 
@@ -157,6 +157,8 @@ class PairHours(pa.DataFrameModel):
     country: pl.String = pa.Field(nullable=False, isin=["DE", "FR"])
     station_type: pl.String = pa.Field(nullable=True)
     station_area: pl.String = pa.Field(nullable=True)
+    measurement_method: pl.String = pa.Field(nullable=True, description="EEA field, e.g. TEOM, BETA")
+    method_class: pl.String = pa.Field(nullable=True, description="instrument family (eea.method_classes)")
     distance_km: pl.Float64 = pa.Field(nullable=True, ge=0)
     distance_band: pl.String = pa.Field(nullable=True, isin=["near", "far"])
     pair_status: pl.String = pa.Field(nullable=False)

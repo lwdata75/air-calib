@@ -8,12 +8,27 @@
 Clients visés : une collectivité qui veut un réseau de mesure dense à bas coût, un promoteur
 immobilier, un assureur santé.
 
-**Statut :** étape 3 (nettoyage, couche silver) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
-[`01`](notebooks/01_sources_et_faisabilite.ipynb), [`02`](notebooks/02_ingestion_bronze.ipynb) et
-[`03`](notebooks/03_nettoyage_silver.ipynb), et le rapport d'entonnoir [`reports/funnel.md`](reports/funnel.md).
-Ce README sera complété au fil des étapes (résultats, figures, choix et limites).
+**Statut :** étape 4 (exploration) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
+[`01`](notebooks/01_sources_et_faisabilite.ipynb), [`02`](notebooks/02_ingestion_bronze.ipynb),
+[`03`](notebooks/03_nettoyage_silver.ipynb) et [`04`](notebooks/04_exploration_paires.ipynb), et le rapport
+d'entonnoir [`reports/funnel.md`](reports/funnel.md). Ce README sera complété au fil des étapes.
 
-## Un exemple de rigueur : l'horloge des stations, vérifiée et pas supposée
+## Le point de départ : un capteur à 30 € sans correction
+
+Les cibles de performance de l'agence américaine de l'environnement (EPA) pour les capteurs de PM2.5 : $R^2 \ge 0{,}70$,
+pente $1 \pm 0{,}35$, ordonnée à l'origine entre −5 et +5 µg/m³, RMSE ≤ 7 µg/m³ (capteur régressé sur la référence).
+**Sans aucune correction**, sur 2024–2025 :
+
+| | horaire | journalier |
+|---|---|---|
+| Allemagne (1 229 / 1 192 paires) | **19,9 %** des paires passent les 4 cibles | **32,3 %** |
+| France (136 / 123 paires) | **11,8 %** | **17,9 %** |
+
+La cible la plus manquée est la pente : le capteur brut ne voit qu'environ 60 % de la référence, et ce rapport dépend
+surtout de l'humidité (0,42 en air sec, 0,79 en air saturé). C'est le « avant » ; le modèle sera jugé sur la part de
+paires qu'il fait passer de l'autre côté. Détails : notebook 04.
+
+## Un exemple de rigueur : l'horloge des stations, vérifiée et pas supposée, sur toutes les paires
 
 Comparer un capteur à une station n'a de sens que si les deux parlent de **la même heure**. Les métadonnées
 officielles annoncent « UTC » pour les stations françaises et « UTC+01 » pour les allemandes. Plutôt que de les
@@ -29,12 +44,25 @@ France ne sont donc pas en UTC malgré leurs métadonnées : la règle `heure_UT
 Sans ce contrôle, toutes les paires françaises auraient été comparées avec une heure de décalage, une erreur
 silencieuse qui aurait dégradé le modèle sans jamais lever d'alerte.
 
-Le contrôle est désormais **automatique sur toutes les paires et toutes les stations** (couche silver), sur les
-*variations* d'une heure à l'autre (les niveaux, qui varient lentement, donnent une courbe trop plate pour trancher),
-avec un test de significativité. **Contre-épreuve** : si l'on retire la correction, il rejette 1 085 paires sur
-1 142 ; avec elle, 29 paires et 7 stations, dont 5 mesurent avec un TEOM, un instrument à la réponse retardée d'environ
-une demi-heure. Ces paires sont exclues et comptées dans l'entonnoir. Détails : notebooks 01 (section 6) et 03
-(section 6), [`docs/JOURNAL.md`](docs/JOURNAL.md).
+Le contrôle est ensuite **automatique sur toutes les paires et toutes les stations** (couche silver). Une première
+version, sur les *niveaux* de pollution, se trompait : les niveaux varient lentement, la corrélation est presque plate
+entre 0 et ±1 h (0,920 contre 0,921 pour une excellente paire), et elle rejetait 171 paires sur 1 440 sans raison. Le
+contrôle retenu corrèle les **variations d'une heure à l'autre**, dont le pic est net au vrai décalage :
+
+$$
+r(k) = \operatorname{corr}\big(\Delta\text{capteur}(h),\ \Delta\text{station}(h+k)\big),\qquad
+z = \big(\operatorname{atanh} r(k^\star) - \operatorname{atanh} r(0)\big)\sqrt{\tfrac{n-3}{2}}
+$$
+
+Une paire (ou une station, toutes ses paires regroupées) est en décalage si son meilleur $k^\star \ne 0$ bat $k = 0$
+avec $z \ge 3$ (test de Fisher).
+
+**La contre-épreuve prouve qu'il fonctionne** : si l'on retire volontairement la correction `Start − 1 h`, il rejette
+**1 085 paires vérifiables sur 1 142** et 207 stations sur 216 ; avec la correction, 29 paires et 7 stations
+seulement. Parmi ces 7 stations, 5 mesurent avec un **TEOM**, une microbalance qui répond avec environ une demi-heure
+de retard : ce n'est pas une erreur d'horloge, elles sont gardées et leur méthode de mesure devient une variable. Les
+2 autres stations et 10 paires isolées sont exclues et comptées dans l'entonnoir. Détails : notebooks 01 (section 6)
+et 03 (section 6), [`docs/JOURNAL.md`](docs/JOURNAL.md).
 
 ## Le risque n°1, chiffré : l'humidité des sondes bon marché
 
@@ -79,7 +107,7 @@ make setup     # uv sync --frozen
 make test      # tests unitaires hors-ligne
 make lint      # ruff
 make sample    # tout le pipeline sur 10 capteurs par pays et un mois (≈ 1 min)
-make data      # volume complet (≈ 3 h de téléchargement, 13 min de bronze, 2 min de silver ; ≈ 10 Go)
+make data      # volume complet (≈ 3 h de téléchargement, 13 min de bronze, 4 min de silver ; ≈ 9,4 Go)
 ```
 
 Commandes détaillées : `python -m aircalib discover` (étape 1 : inventaire, paires, contrôle d'horloge),
@@ -91,7 +119,9 @@ accepte `--sample`.
 Le nettoyage ne supprime aucune ligne : chaque mesure ou heure garde son statut (`ok` ou la première règle violée),
 et [`reports/funnel.md`](reports/funnel.md) compte ce que chaque règle retire. Uniquement des règles physiques et de
 cohérence, **aucun filtre statistique d'aberrations** : les pics par forte humidité sont ce que le modèle doit
-apprendre à corriger. Résultat : **13,3 millions d'heures-paires utilisables**.
+apprendre à corriger ; une valeur répétée n'est « figée » que si c'est un code de panne ou si la station varie pendant
+ce temps (vérifié : la règle ne retire pas l'air propre en priorité). Résultat : **13,8 millions d'heures-paires
+utilisables**.
 
 Tout tourne en local ; les données sont écrites dans `data/` (jamais versionné).
 

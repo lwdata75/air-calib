@@ -1,6 +1,6 @@
 # Rapport d'entonnoir — mode échantillon (`--sample`)
 
-_Généré automatiquement le 2026-10-14 12:14 UTC à partir des statuts de la couche silver (aucune ligne supprimée : chaque mesure ou heure garde sa raison)._
+_Généré automatiquement le 2026-10-14 12:49 UTC à partir des statuts de la couche silver (aucune ligne supprimée : chaque mesure ou heure garde sa raison)._
 
 ## 1. Mesures SDS011 (une ligne = une mesure brute)
 
@@ -14,26 +14,26 @@ _Généré automatiquement le 2026-10-14 12:14 UTC à partir des statuts de la c
 | pm_saturated | saturation du capteur (PM2.5 = 999,9 avec PM10 = 1 999,9) | 4 | 328,667 | 0 | 20 | 0 | 20 |
 | pm_above_range | au-delà de la plage du SDS011 (999,9 µg/m³) | 3 | 328,664 | 0 | 20 | 0 | 20 |
 | pm25_above_pm10 | PM2.5 > PM10 : incohérent (PM2.5 fait partie de PM10) | 0 | 328,664 | 0 | 20 | 0 | 20 |
-| pm_stuck | valeurs identiques pendant ≥ 1 h (`particles.stuck_min_hours`) : capteur figé | 764 | 327,900 | 0 | 20 | 0 | 20 |
-| usable | **utilisable** | 0 | 327,900 | 0 | 20 | 0 | 20 |
+| pm_stuck | valeurs identiques ≥ 1 h ET (code de panne 0/0 OU station qui varie ≥ 5 µg/m³) : figé | 508 | 328,156 | 0 | 20 | 0 | 20 |
+| usable | **utilisable** | 0 | 328,156 | 0 | 20 | 0 | 20 |
 
 ## 2. Paires × heures (une ligne = une heure d'un segment de capteur)
 
 | step | raison | removed | remaining | capteurs_lost | capteurs_remaining | paires_lost | paires_remaining | stations_lost | stations_remaining |
 |---|---|---|---|---|---|---|---|---|---|
 | start | point de départ | 0 | 14,233 | 0 | 20 | 0 | 20 | 0 | 18 |
-| no_valid_reading | aucune mesure valide dans l'heure (raison dominante dans `main_flag`) | 10 | 14,223 | 0 | 20 | 0 | 20 | 0 | 18 |
-| incomplete_hour | complétude < 75 % de la cadence propre du capteur | 479 | 13,744 | 0 | 20 | 0 | 20 | 0 | 18 |
-| no_reference_station | segment de position sans station utilisable à ≤ 3 km | 0 | 13,744 | 0 | 20 | 0 | 20 | 0 | 18 |
-| reference_not_downloaded | station de référence non téléchargée | 0 | 13,744 | 0 | 20 | 0 | 20 | 0 | 18 |
-| reference_missing | pas de valeur EEA PM2.5 à cette heure | 0 | 13,744 | 0 | 20 | 0 | 20 | 0 | 18 |
-| reference_invalid | valeur EEA PM2.5 invalide (drapeau ou −999) | 94 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
-| reference_not_verified | valeur EEA PM2.5 non vérifiée | 0 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
-| reference_negative_beyond_uncertainty | valeur EEA PM2.5 < −5 µg/m³ | 0 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
-| clock_mismatch_station | station exclue : son décalage d'horloge (toutes paires) ≠ 0 | 0 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
-| clock_mismatch | paire exclue : son meilleur décalage d'horloge ≠ 0 | 0 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
-| no_official_humidity | aucune humidité officielle (ni station principale, ni secours) | 0 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
-| usable | **utilisable** | 0 | 13,650 | 0 | 20 | 0 | 20 | 0 | 18 |
+| no_valid_reading | aucune mesure valide dans l'heure (raison dominante dans `main_flag`) | 7 | 14,226 | 0 | 20 | 0 | 20 | 0 | 18 |
+| incomplete_hour | complétude < 75 % de la cadence propre du capteur | 467 | 13,759 | 0 | 20 | 0 | 20 | 0 | 18 |
+| no_reference_station | segment de position sans station utilisable à ≤ 3 km | 0 | 13,759 | 0 | 20 | 0 | 20 | 0 | 18 |
+| reference_not_downloaded | station de référence non téléchargée | 0 | 13,759 | 0 | 20 | 0 | 20 | 0 | 18 |
+| reference_missing | pas de valeur EEA PM2.5 à cette heure | 0 | 13,759 | 0 | 20 | 0 | 20 | 0 | 18 |
+| reference_invalid | valeur EEA PM2.5 invalide (drapeau ou −999) | 94 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
+| reference_not_verified | valeur EEA PM2.5 non vérifiée | 0 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
+| reference_negative_beyond_uncertainty | valeur EEA PM2.5 < −5 µg/m³ | 0 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
+| clock_mismatch_station | station exclue : décalage (toutes paires) ≠ 0, hors retard d'instrument | 0 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
+| clock_mismatch | paire exclue : meilleur décalage ≠ 0, hors retard d'instrument (TEOM) | 0 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
+| no_official_humidity | aucune humidité officielle (ni station principale, ni secours) | 0 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
+| usable | **utilisable** | 0 | 13,665 | 0 | 20 | 0 | 20 | 0 | 18 |
 
 ### Heures-paires utilisables par pays et bande de distance
 
@@ -42,7 +42,7 @@ _Généré automatiquement le 2026-10-14 12:14 UTC à partir des statuts de la c
 | DE | far | 3,248 | 5 | 5 | 5 | 11.5 | 0.060 |
 | DE | near | 3,550 | 5 | 5 | 5 | 20.2 | 0.650 |
 | FR | far | 4,108 | 6 | 6 | 4 | 15.6 | 0.000 |
-| FR | near | 2,744 | 4 | 4 | 4 | 74.6 | 0.000 |
+| FR | near | 2,759 | 4 | 4 | 4 | 74.7 | 0.000 |
 
 ### Heures-paires utilisables par pays et type de station
 
@@ -50,22 +50,32 @@ _Généré automatiquement le 2026-10-14 12:14 UTC à partir des statuts de la c
 |---|---|---|---|---|---|---|---|
 | DE | background | 4,679 | 7 | 7 | 7 | 23.3 | 0.530 |
 | DE | traffic | 2,119 | 3 | 3 | 3 | 0.000 | 0.000 |
-| FR | background | 5,486 | 8 | 8 | 6 | 37.1 | 0.000 |
+| FR | background | 5,501 | 8 | 8 | 6 | 37.2 | 0.000 |
 | FR | traffic | 1,366 | 2 | 2 | 2 | 47.9 | 0.000 |
+
+### Heures-paires utilisables par pays et méthode de mesure de la station
+
+| country | method_class | heures_paires | paires | capteurs | stations | pct_humidité_locale_fiable | pct_secours_météo |
+|---|---|---|---|---|---|---|---|
+| DE | nephelometry_beta | 666 | 1 | 1 | 1 | 0.000 | 0.000 |
+| DE | optical | 6,132 | 9 | 9 | 9 | 17.8 | 0.410 |
+| FR | beta | 1,366 | 2 | 2 | 2 | 47.9 | 0.000 |
+| FR | optical | 4,804 | 7 | 7 | 5 | 28.1 | 0.000 |
+| FR | teom | 697 | 1 | 1 | 1 | 100.0 | 0.000 |
 
 ### Contrôle d'horloge, par paire (variations horaires, verdict selon `clock.*`)
 
 | clock_flag | best_lag_h | paires | heures | r_lag0_médian |
 |---|---|---|---|---|
 | clock_unverifiable | 0 | 1 | 433 | 0.605 |
-| ok | 0 | 19 | 12,954 | 0.430 |
+| ok | 0 | 19 | 12,973 | 0.430 |
 
 ### Contrôle d'horloge, par station (paires regroupées)
 
 | clock_flag | stations | heures |
 |---|---|---|
 | clock_unverifiable | 1 | 433 |
-| ok | 17 | 12,954 |
+| ok | 17 | 12,973 |
 
 Stations en décalage (toutes leurs paires sont exclues) :
 

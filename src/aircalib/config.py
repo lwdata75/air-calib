@@ -137,6 +137,8 @@ class Eea(BaseModel):
     bronze_margin_days: int
     clock_offset_h: int
     negative_floor_ugm3: float
+    method_classes: dict[str, str]
+    method_unknown: str
 
 
 class Pairing(BaseModel):
@@ -156,6 +158,8 @@ class Particles(BaseModel):
     pm25_saturation_ugm3: float
     pm10_saturation_ugm3: float
     stuck_min_hours: float
+    stuck_codes: list[tuple[float, float]]
+    stuck_reference_range_ugm3: float
     cadence_max_gap_s: int
     min_completeness: float
 
@@ -184,6 +188,7 @@ class Clock(BaseModel):
     min_hours: int
     min_r: float
     min_z: float
+    instrument_lag_h: dict[str, int]
 
 
 class Dwd(BaseModel):
@@ -201,6 +206,18 @@ class MeteoFrance(BaseModel):
     department_aliases: dict[str, str]
     columns: list[str]
     keep_raw: bool
+
+
+class Evaluation(BaseModel):
+    epa_r2_min: float
+    epa_slope_range: tuple[float, float]
+    epa_intercept_range: tuple[float, float]
+    epa_rmse_max: float
+    min_hours: int
+    min_days: int
+    daily_min_hours: int
+    humidity_bins: list[float]
+    level_bins: list[float]
 
 
 class Physics(BaseModel):
@@ -238,6 +255,7 @@ class Settings(BaseSettings):
     clock: Clock
     dwd: Dwd
     meteo_france: MeteoFrance
+    evaluation: Evaluation
     physics: Physics
     sample: Sample
 

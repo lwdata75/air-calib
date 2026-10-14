@@ -131,7 +131,25 @@ def bronze_eea(settings: Settings) -> int:
         except Exception as exc:
             failures += 1
             manifest.append({**key, "status": FAILED, "error": repr(exc)[:500]})
+    if not cfg.keep_raw and failures == 0:
+        purge_raw_eea(settings)
     return failures
+
+
+def purge_raw_eea(settings: Settings) -> int:
+    """Delete the raw EEA files once bronze holds every planned point.
+
+    Bronze keeps the study period of the planned points; discovery's own downloads
+    (stations near any sensor) were only needed for the monthly availability, cached
+    in ``data/meta``. Returns the number of bytes freed.
+    """
+    freed = 0
+    for path in (settings.paths.raw / "eea").rglob("*.parquet"):
+        freed += path.stat().st_size
+        path.unlink()
+    if freed:
+        log.info("EEA: %.0f MB of raw files deleted (bronze holds them)", freed / 1e6)
+    return freed
 
 
 # --------------------------------------------------------------------------- DWD

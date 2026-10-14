@@ -78,8 +78,12 @@ Silver : `silver/sensor_community/{pm/<id>.parquet, pm_hourly, segments, humidit
   virgule décimale chez certains firmwares ; `sensor_type` en MAJUSCULES dans le contenu ; capteurs déplacés (un
   capteur était à Hanoï avant Magdebourg). Horloges DWD et Météo-France vérifiées UTC (pas de saut hiver/été).
 - SDS011 : saturation = PM2.5 999,9 avec PM10 1 999,9 ; code d'erreur −1/−1 ; cadences de 60 à 300 s (médiane 146 s).
-- Contrôle d'horloge sur les *variations* horaires (pas les niveaux), par paire et par station ; les stations TEOM
-  (Saxe, FR33220) répondent avec ≈ ½ h de retard et sont exclues par la règle.
+- Contrôle d'horloge sur les *variations* horaires (pas les niveaux), z de Fisher, par paire et par station ; les
+  stations TEOM répondent avec ≈ ½ h de retard : `instrument_lag`, **gardées** ; `method_class` sur chaque paire.
+- Valeur SDS011 « figée » seulement si code de panne (0/0) ou station qui varie ≥ 5 µg/m³ pendant le plateau.
+- Bruts EEA supprimés après bronze (`eea.keep_raw: false`) ; la découverte relit sa disponibilité en cache.
+- Sans correction : 19,9 % des paires DE passent les cibles EPA en horaire, 32,3 % en journalier ; erreur
+  multiplicative (rapport ≈ 0,5–0,6) dépendant surtout de l'humidité ; paires « invérifiables » ≈ capteurs défectueux.
 
 ## Convention horaire du projet
 Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

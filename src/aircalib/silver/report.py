@@ -32,7 +32,7 @@ PARTICLE_REASONS = {
     pt.PM_SATURATED: "saturation du capteur (PM2.5 = 999,9 avec PM10 = 1 999,9)",
     pt.PM_ABOVE_RANGE: "au-delà de la plage du SDS011 (999,9 µg/m³)",
     pt.PM25_ABOVE_PM10: "PM2.5 > PM10 : incohérent (PM2.5 fait partie de PM10)",
-    pt.PM_STUCK: "valeurs identiques pendant ≥ 1 h (`particles.stuck_min_hours`) : capteur figé",
+    pt.PM_STUCK: "valeurs identiques ≥ 1 h ET (code de panne 0/0 OU station qui varie ≥ 5 µg/m³) : figé",
 }
 PROBE_REASONS = {
     hum.MISSING: "humidité vide / NaN",
@@ -62,8 +62,8 @@ HOUR_REASONS = {
     "reference_invalid": "valeur EEA PM2.5 invalide (drapeau ou −999)",
     "reference_not_verified": "valeur EEA PM2.5 non vérifiée",
     "reference_negative_beyond_uncertainty": "valeur EEA PM2.5 < −5 µg/m³",
-    "clock_mismatch_station": "station exclue : son décalage d'horloge (toutes paires) ≠ 0",
-    "clock_mismatch": "paire exclue : son meilleur décalage d'horloge ≠ 0",
+    "clock_mismatch_station": "station exclue : décalage (toutes paires) ≠ 0, hors retard d'instrument",
+    "clock_mismatch": "paire exclue : meilleur décalage ≠ 0, hors retard d'instrument (TEOM)",
     "no_official_humidity": "aucune humidité officielle (ni station principale, ni secours)",
 }
 
@@ -160,6 +160,7 @@ def build(settings: Settings) -> tuple[str, dict[str, pl.DataFrame]]:
     tables["humidity_hours"] = _explain(humidity_hours, PROBE_REASONS)
     tables["usable_country_band"] = usable_by(hours, ["country", "distance_band"])
     tables["usable_station_type"] = usable_by(hours, ["country", "station_type"])
+    tables["usable_method"] = usable_by(hours, ["country", "method_class"])
     tables["clock"] = (
         clock_check.group_by("clock_flag", "best_lag_h")
         .agg(
@@ -202,6 +203,8 @@ def build(settings: Settings) -> tuple[str, dict[str, pl.DataFrame]]:
         + _table(tables["usable_country_band"])
         + "\n### Heures-paires utilisables par pays et type de station\n\n"
         + _table(tables["usable_station_type"])
+        + "\n### Heures-paires utilisables par pays et méthode de mesure de la station\n\n"
+        + _table(tables["usable_method"])
         + "\n### Contrôle d'horloge, par paire (variations horaires, verdict selon `clock.*`)\n\n"
         + _table(tables["clock"])
         + "\n### Contrôle d'horloge, par station (paires regroupées)\n\n"

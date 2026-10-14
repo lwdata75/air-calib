@@ -86,8 +86,9 @@ eea:
   valid_codes: [1, 2, 3]
   verified_codes: [1]
   missing_sentinel: -999.0
-  # The raw files (full 2013+ history, ~1 MB each) are kept: discovery reads them.
-  keep_raw: true
+  # Raw files (full 2013+ history, ~1 MB each) are deleted once bronze holds them: discovery caches
+  # what it needs from them (monthly availability) in data/meta.
+  keep_raw: false
   # Bronze keeps the study period plus this margin (Start is on the station clock).
   bronze_margin_days: 1
   # Measured in step 1 (lagged correlation, DE and FR): UTC hour = Start - clock_offset_h.
@@ -96,6 +97,17 @@ eea:
   # median -0.8 ug/m3). They are kept as reported (clipping or dropping them would bias the target
   # upwards in clean air); below this floor a value is no longer noise and is flagged.
   negative_floor_ugm3: -5.0
+  # Reference instrument families, from the EEA "Measurement Method" (feature and result breakdown).
+  # light-scat = optical aerosol spectrometer (FR: Fidas 200; DE: model not given), OPC-CMC = Fidas,
+  # nephelometry+beta = hybrid (e.g. SHARP 5030), BETA = beta attenuation (BAM), TEOM = microbalance.
+  method_classes:
+    light-scat: optical
+    OPC-CMC: optical
+    nephelometry+beta: nephelometry_beta
+    BETA: beta
+    TEOM: teom
+    TEOM-FDMS: teom
+  method_unknown: unknown
 
 pairing:
   # Rule: 1 sensor = 1 station, the nearest one with verified data while the sensor is active.
@@ -113,6 +125,12 @@ particles:
   # 1 ug/m3 never stays identical for an hour; the long plateaus are 0/0, < 1, -1 and 999.9 while
   # the reference station reads 5-7 ug/m3 (notebook 03).
   stuck_min_hours: 1.0
+  # A long plateau is "stuck" only if it is a known failure code (PM10, PM2.5) -- the -1/-1 error and
+  # the 999.9 cap are caught by earlier rules -- or if the reference station moved by at least
+  # stuck_reference_range_ugm3 meanwhile (same 5 ug/m3 bound as the EEA noise floor). Otherwise a
+  # repeated small value may be real clean air (clean hours were over-represented, notebook 03).
+  stuck_codes: [[0.0, 0.0]]
+  stuck_reference_range_ugm3: 5.0
   # A sensor's cadence = median gap between consecutive readings, per sensor and month, ignoring
   # gaps longer than this (outages).
   cadence_max_gap_s: 3600
@@ -165,6 +183,10 @@ clock:
   min_hours: 500
   min_r: 0.1
   min_z: 3.0
+  # Instruments known to respond late: a station (or pair) of this method class whose best lag is
+  # this value is flagged "instrument_lag" and KEPT (not a clock error). TEOM: ~1/2 h late.
+  instrument_lag_h:
+    teom: 1
 
 dwd:
   # Hourly 2 m temperature + relative humidity (quality-controlled "historical" release).
@@ -184,6 +206,23 @@ meteo_france:
   department_aliases: {"2A": "20", "2B": "20"}   # Corsica is one file for Meteo-France
   columns: [NUM_POSTE, NOM_USUEL, LAT, LON, ALTI, AAAAMMJJHH, T, QT, U, QU]
   keep_raw: false
+
+evaluation:
+  # US EPA performance targets for PM2.5 sensors (Duvall et al., 2021, EPA/600/R-20/280), for a sensor
+  # regressed on the reference: R2 >= 0.70, slope 1 +- 0.35, intercept -5..+5 ug/m3, RMSE <= 7 ug/m3.
+  # The EPA states them for 24-h means; the project also reports them hourly.
+  epa_r2_min: 0.70
+  epa_slope_range: [0.65, 1.35]
+  epa_intercept_range: [-5.0, 5.0]
+  epa_rmse_max: 7.0
+  # A pair is evaluated with at least this many usable hours / complete days.
+  min_hours: 500
+  min_days: 30
+  # A day counts when both sides have at least this many valid hours (75 % of 24).
+  daily_min_hours: 18
+  # Bins for the error analysis (official relative humidity in %, reference PM2.5 in ug/m3).
+  humidity_bins: [50, 60, 70, 80, 90, 95]
+  level_bins: [5, 10, 15, 25, 50]
 
 physics:
   # kappa-Kohler hygroscopic growth (step 5): C = 1 + (kappa / density_ratio) / (1 / a_w - 1).

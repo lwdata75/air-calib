@@ -201,6 +201,9 @@ async def download_eea(settings: Settings, plan: Plan) -> int:
     points = await eea_sampling_points(settings, plan)
     points.write_parquet(reference_dir(settings) / "eea_sampling_points.parquet")
     manifest = Manifest(settings.paths.raw / "eea" / "_manifest.jsonl", ("pollutant", "sampling_point"))
+    converted = Manifest(
+        settings.paths.bronze / "eea" / "_manifest.jsonl", ("pollutant", "sampling_point")
+    ).done()
     failures = 0
     async with polite_client(settings.http) as client:
 
@@ -208,6 +211,8 @@ async def download_eea(settings: Settings, plan: Plan) -> int:
             nonlocal failures
             dest = eea.raw_path(settings.paths.raw, rec["pollutant"], rec["country"], rec["sampling_point"])
             key = {"pollutant": rec["pollutant"], "sampling_point": rec["sampling_point"]}
+            if manifest.key_of(key) in converted:  # already in bronze: the raw file is not needed again
+                return
             try:
                 await eea.download_parquet(client, rec["url"], dest)
                 manifest.append({**key, "status": OK, "bytes": dest.stat().st_size})

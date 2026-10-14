@@ -7,9 +7,9 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 | 0 | Socle du projet | ✅ terminé | arborescence, `pyproject.toml` (uv), `Makefile`, `configs/default.yaml`, ruff/pytest, `.gitignore`, CLAUDE.md, PLAN, JOURNAL |
 | 1 | Exploration des sources et faisabilité (GO / NO-GO) | ✅ terminé (GO) | `ingest/{http,sensor_community,eea,discovery}.py`, `transform/{pairing,hourly}.py`, `notebooks/01_sources_et_faisabilite.ipynb`, `python -m aircalib discover` |
 | 2 | Ingestion à l'échelle (bronze) | ✅ terminé | `ingest/{plan,download,bronze,manifest,report,dwd,meteo_france}.py`, `schemas/bronze.py`, `transform/{physics,humidity,positions}.py`, `notebooks/02_ingestion_bronze.ipynb`, `reports/ingestion.md` |
-| 3 | Nettoyage (silver) | ✅ terminé — en attente de feu vert | `transform/{particles,runs,reference,weather,clock,funnel}.py`, `silver/{sources,pairs,rules,report}.py`, `schemas/silver.py`, `notebooks/03_nettoyage_silver.ipynb`, `reports/funnel.md`, `python -m aircalib silver` puis `pair` |
-| 4 | Exploration des heures-paires (gold 1) | ⏳ à faire | paires × heures (faites en silver, étape 3) : effet de l'humidité officielle, dérive, type de station, paires invérifiables, notebook 04 |
-| 5 | Feature engineering (gold 2) | ⏳ à faire | familles de features documentées, κ-Köhler ajusté, notebook 05 |
+| 3 | Nettoyage (silver) | ✅ terminé | `transform/{particles,runs,reference,weather,clock,funnel}.py`, `silver/{sources,pairs,rules,report}.py`, `schemas/silver.py`, `notebooks/03_nettoyage_silver.ipynb`, `reports/funnel.md`, `python -m aircalib silver` puis `pair` |
+| 4 | Exploration des heures-paires | ✅ terminé — en attente de feu vert | `evaluation/metrics.py` (régression, cibles EPA, profils d'erreur), `notebooks/04_exploration_paires.ipynb` |
+| 5 | Feature engineering (couche gold) | ⏳ à faire | table gold (heures-paires `ok` + variables), familles de features documentées, κ-Köhler ajusté, notebook 05 |
 | 6 | Modélisation + MLflow | ⏳ à faire | échelle de modèles, GroupKFold par station, test 2025, ablation, Optuna, notebooks 10–11 |
 | 7 | Évaluation finale, transfert, conclusions | ⏳ à faire | cibles EPA, transfert DE → FR, erreur vs distance, notebook 12 |
 | 8 | Finition | ⏳ à faire | README final, `make sample` depuis un clone propre, requirements, lint/tests au vert |
@@ -36,6 +36,24 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 - **Un statut par mesure** (`quality_flag`), entonnoir calculé à partir des statuts.
 - **Découpage** : une station n'est jamais à la fois en entraînement et en test, quelle que soit la distance
   (`cv_group`).
+
+## Décisions du feu vert de l'étape 4 (14/10/2026)
+- Contrôle d'horloge sur les variations horaires (z de Fisher, contre-épreuve) adopté et mis en avant dans le README.
+- **Stations TEOM gardées** (`instrument_lag`) ; `method_class` (méthode de mesure EEA) pour toutes les stations, comme
+  variable et axe de lecture ; DEBY099 et DEMV007 restent exclues.
+- **Paires invérifiables gardées** avec leur drapeau ; comparées dans le notebook 04 ; test avec et sans à l'étape 6.
+- **Disque** : statuts en `pl.Enum`, bruts EEA supprimés (10,28 → 9,43 Go).
+- **Valeurs figées** : seulement code de panne (0/0) ou station qui varie ≥ 5 µg/m³ (vérification air propre faite).
+
+## Détail de l'étape 4 (fait)
+1. Le « avant » : cibles EPA sans correction, horaire et journalier, par pays, bande, type de station et méthode.
+2. Erreur brute selon l'humidité officielle, la saison, le type de station, la méthode, la bande, l'âge ; dérive
+   annuelle par paire.
+3. Forme de la relation (rapport stable, erreur absolue croissante → échelle log proposée).
+4. Variabilité entre paires ; paires invérifiables contre vérifiées.
+
+Résultat : **19,9 % des paires allemandes passent les cibles EPA en horaire et 32,3 % en journalier sans correction**
+(France 11,8 % et 17,9 %) ; l'humidité fait passer le rapport capteur / référence de 0,42 à 0,79.
 
 ## Détail de l'étape 1 (fait)
 1. Échantillon réel Sensor.Community (SDS011, BME280, DHT22) : colonnes, types, anomalies → journal.
@@ -89,8 +107,13 @@ FR far 0,68 M ; 64 paires exclues par l'horloge (dont 5 stations TEOM au temps d
   et locale corrigée par l'officielle ; âge de la sonde comme variable candidate.
 - **Étapes 4 → 7** : `station_type` et `station_area` conservés dans gold ; **toutes les évaluations rapportées par
   type de station** (trafic / fond urbain / périurbain / rural).
-- **Étape 4** : explorer les heures-paires (effet de l'humidité officielle, dérive, type de station) ; décider du sort
-  des 298 paires « invérifiables » et des stations TEOM exclues (variable « méthode de mesure » ?).
-- **Étape 6** : validation croisée **groupée par station (GroupKFold, `cv_group`) sur toutes les distances** : une
-  station n'est jamais à la fois en entraînement et en test (139 stations ont des heures utilisables dans les deux
-  bandes) ; **test de sensibilité à X** (0,1 / 0,3 / 0,5).
+- **Étape 6** :
+  - validation croisée **groupée par station (GroupKFold, `cv_group`)** : une station n'est jamais à la fois en
+    entraînement et en test (144 stations ont des heures utilisables dans les deux bandes) ;
+  - **test « distance » par station** : dans chaque pli, une station de test et **toutes** ses paires (≤ 1,5 km et
+    1,5–3 km) sont exclues de l'entraînement ; on entraîne sur les paires ≤ 1,5 km des **autres** stations, puis on
+    mesure l'erreur sur les paires de la station de test, **bande par bande** ;
+  - test de sensibilité à X (0,1 / 0,3 / 0,5), test avec et sans les paires invérifiables ;
+  - échelle log contre µg/m³ (erreur multiplicative, notebook 04), sur les mêmes plis ;
+  - erreur sur 2025 d'un modèle appris sur 2024 (dérive) ;
+  - résultats par type de station et par méthode de mesure.

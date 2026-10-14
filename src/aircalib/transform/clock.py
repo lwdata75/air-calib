@@ -17,7 +17,9 @@ Verdict (thresholds in ``configs/default.yaml``, section ``clock``):
   correlation below ``min_r`` (the changes carry no readable timing);
 * ``clock_mismatch``: the best lag is not 0 and beats lag 0 by at least ``min_z``
   (Fisher z of the two correlations);
-* ``ok`` otherwise.
+* ``ok`` otherwise;
+* ``instrument_lag``: a mismatch explained by the reference instrument (``instrument_lag``),
+  kept.
 
 The same test is run per **station**, pooling the hours of all its pairs: sensor
 timestamps all come from the same server, so a timing problem is a station's
@@ -28,7 +30,7 @@ from __future__ import annotations
 
 import polars as pl
 
-OK, MISMATCH, UNVERIFIABLE = "ok", "clock_mismatch", "clock_unverifiable"
+OK, MISMATCH, UNVERIFIABLE, INSTRUMENT_LAG = "ok", "clock_mismatch", "clock_unverifiable", "instrument_lag"
 
 
 def hourly_changes(hours: pl.DataFrame) -> pl.DataFrame:
@@ -89,4 +91,21 @@ def clock_status(
             .otherwise(pl.lit(OK))
         )
         .sort(group)
+    )
+
+
+def instrument_lag(status: pl.DataFrame, lag_by_method: dict[str, int]) -> pl.DataFrame:
+    """Re-label as ``instrument_lag`` the mismatches explained by a late-responding instrument.
+
+    ``status`` needs ``method_class`` next to ``clock_flag`` and ``best_lag_h``. A TEOM
+    microbalance reports with about half an hour of delay: its best lag is +1 h with the
+    correlation spread over 0 and +1, in winter as in summer. That is not a clock error,
+    so the pair or station is kept (its method is a feature of the model).
+    """
+    expected = pl.col("method_class").replace_strict(lag_by_method, default=None, return_dtype=pl.Int32)
+    explained = (pl.col("clock_flag") == MISMATCH) & (pl.col("best_lag_h") == expected)
+    return status.with_columns(
+        clock_flag=pl.when(explained.fill_null(False))
+        .then(pl.lit(INSTRUMENT_LAG))
+        .otherwise(pl.col("clock_flag"))
     )

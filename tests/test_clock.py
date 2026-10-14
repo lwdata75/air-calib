@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import polars as pl
 
-from aircalib.transform.clock import clock_status, hourly_changes, lag_correlations
+from aircalib.transform.clock import clock_status, hourly_changes, instrument_lag, lag_correlations
 
 T0 = datetime(2024, 1, 1)
 
@@ -55,3 +55,17 @@ def test_station_pooling_groups_pairs():
         lag_correlations(hourly_changes(hours), 3, group="station"), 100, 0.1, 3.0, group="station"
     )
     assert station.select("station", "best_lag_h", "clock_flag").row(0) == ("S1", 1, "clock_mismatch")
+
+
+def test_late_instrument_is_not_a_clock_error():
+    status = pl.DataFrame(
+        {
+            "pair_id": ["teom", "teom_odd", "beta"],
+            "best_lag_h": [1, -1, 1],
+            "clock_flag": ["clock_mismatch"] * 3,
+            "method_class": ["teom", "teom", "beta"],
+        }
+    )
+    out = instrument_lag(status, {"teom": 1})["clock_flag"].to_list()
+    # A TEOM late by +1 h is its known response; -1 h at a TEOM, or +1 h at a beta gauge, is not.
+    assert out == ["instrument_lag", "clock_mismatch", "clock_mismatch"]

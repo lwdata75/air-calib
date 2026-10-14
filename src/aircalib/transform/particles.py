@@ -12,7 +12,10 @@ rule it fails, in the order of ``RULES`` (that order is the funnel order).
 * ``pm_saturated``: the sensor's cap (PM2.5 = 999.9 with PM10 = 1999.9);
 * ``pm_above_range``: above the SDS011 specification range (999.9 ug/m3);
 * ``pm25_above_pm10``: PM2.5 is part of PM10, so PM2.5 > PM10 is incoherent;
-* ``pm_stuck``: identical (PM10, PM2.5) readings for ``particles.stuck_min_hours`` or more.
+* ``pm_stuck``: identical (PM10, PM2.5) readings for ``particles.stuck_min_hours`` or more,
+  **and** either a known failure code (``particles.stuck_codes``, e.g. 0/0) or a reference
+  station that moved by at least ``particles.stuck_reference_range_ugm3`` meanwhile. A small
+  value repeated in calm, clean air is a plausible reading and stays ``ok``.
 
 There is deliberately **no statistical outlier filter** (z-score, IQR...): the
 peaks seen in humid air are exactly what the model has to learn to correct.
@@ -23,7 +26,7 @@ from __future__ import annotations
 import polars as pl
 
 from aircalib.config import Particles
-from aircalib.transform.runs import in_constant_run
+from aircalib.transform.runs import run_id
 
 OK = "ok"
 PM_MISSING = "pm_missing"
@@ -59,10 +62,47 @@ def _flag(rule: str, mask: pl.Expr) -> pl.Expr:
     return pl.when(unflagged & mask.fill_null(False)).then(pl.lit(rule)).otherwise(pl.col(FLAG)).alias(FLAG)
 
 
-def flag_readings(readings: pl.DataFrame, cfg: Particles) -> pl.DataFrame:
+def _stuck(out: pl.DataFrame, cfg: Particles, reference: pl.DataFrame | None) -> pl.Expr:
+    """Mask of the readings of a long plateau that is a failure code or contradicted by the station."""
+    t = pl.col("timestamp")
+    out = out.with_columns(
+        _run=run_id(
+            pl.col(FLAG).is_null(),
+            ["P1", "P2"],
+            by="sensor_id",
+            time_col="timestamp",
+            max_gap_hours=cfg.stuck_min_hours,
+        )
+    )
+    long_run = pl.col(FLAG).is_null() & (
+        (t.max() - t.min()).over("_run") >= pl.duration(hours=cfg.stuck_min_hours)
+    )
+    code = pl.any_horizontal([(pl.col("P1") == p1) & (pl.col("P2") == p2) for p1, p2 in cfg.stuck_codes])
+    out = out.with_columns(_long=long_run, _code=code)
+    moved = pl.lit(False)
+    if reference is not None:
+        keys = [c for c in ("sensor_id", "segment") if c in reference.columns and c in out.columns]
+        ranges = (
+            out.filter(pl.col("_long") & ~pl.col("_code"))
+            .select("_run", *keys, hour=t.dt.truncate("1h"))
+            .unique()
+            .join(reference, on=[*keys, "hour"])
+            .group_by("_run")
+            .agg(_range=pl.col("reference").max() - pl.col("reference").min())
+        )
+        moving = ranges.filter(pl.col("_range") >= cfg.stuck_reference_range_ugm3)["_run"]
+        moved = pl.col("_run").is_in(moving.implode())
+    return out.select(pl.col("_long") & (pl.col("_code") | moved)).to_series()
+
+
+def flag_readings(
+    readings: pl.DataFrame, cfg: Particles, reference: pl.DataFrame | None = None
+) -> pl.DataFrame:
     """Add ``quality_flag`` to raw SDS011 readings (``sensor_id, timestamp, P1, P2``); no row is removed.
 
-    The result is sorted by sensor and timestamp.
+    ``reference`` (``sensor_id[, segment], hour, reference``: valid hourly PM2.5 of the paired
+    station) lets a plateau of ordinary values count as stuck when the station moved meanwhile;
+    without it only the failure codes do. The result is sorted by sensor and timestamp.
     """
     p1, p2 = pl.col("P1"), pl.col("P2")
     unflagged = pl.col(FLAG).is_null()
@@ -86,14 +126,8 @@ def flag_readings(readings: pl.DataFrame, cfg: Particles) -> pl.DataFrame:
     )
     out = out.with_columns(_flag(PM_ABOVE_RANGE, (p1 > cfg.max_ugm3) | (p2 > cfg.max_ugm3)))
     out = out.with_columns(_flag(PM25_ABOVE_PM10, p2 > p1))
-    stuck = in_constant_run(
-        pl.col(FLAG).is_null(),
-        ["P1", "P2"],
-        by="sensor_id",
-        time_col="timestamp",
-        min_hours=cfg.stuck_min_hours,
-    )
-    out = out.with_columns(_stuck=stuck).with_columns(_flag(PM_STUCK, pl.col("_stuck"))).drop("_stuck")
+    out = out.with_columns(_stuck=_stuck(out, cfg, reference))
+    out = out.with_columns(_flag(PM_STUCK, pl.col("_stuck"))).drop("_stuck")
     return out.with_columns(pl.col(FLAG).fill_null(OK))
 
 

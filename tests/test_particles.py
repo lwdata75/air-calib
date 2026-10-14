@@ -77,14 +77,42 @@ def test_duplicates_identical_keep_first_conflicts_flag_all():
     assert _flags(df) == ["ok", "duplicate", "duplicate_conflict", "duplicate_conflict", "pm_missing", "ok"]
 
 
-def test_stuck_values_need_the_minimum_duration():
+def test_failure_code_plateau_needs_the_minimum_duration():
     one_hour = int(CFG.stuck_min_hours * 3600)
-    stuck = [(0.0, 0.0, s) for s in range(0, one_hour + 1, 150)]  # 0/0 for exactly the minimum duration
+    stuck = [
+        (0.0, 0.0, s) for s in range(0, one_hour + 1, 150)
+    ]  # 0/0 (failure code) for the minimum duration
     short = [(3.1, 2.0, one_hour + 150 + s) for s in range(0, 1800, 150)]  # identical for 30 min only
     after = [(7.0, 4.0, one_hour + 3000)]
     flags = _flags(_readings(stuck + short + after))
     assert set(flags[: len(stuck)]) == {"pm_stuck"}
     assert set(flags[len(stuck) :]) == {"ok"}
+
+
+def _plateau_with_reference(reference_values):
+    """3.1 / 2.0 repeated for 2 hours, and the station's hourly PM2.5 over those hours."""
+    readings = _readings([(3.1, 2.0, s) for s in range(0, 2 * 3600 + 1, 150)])
+    reference = pl.DataFrame(
+        {
+            "sensor_id": [1] * len(reference_values),
+            "hour": [T0 + timedelta(hours=h) for h in range(len(reference_values))],
+            "reference": reference_values,
+        }
+    )
+    return readings, reference
+
+
+def test_repeated_small_value_in_calm_air_is_not_stuck():
+    readings, reference = _plateau_with_reference([3.0, 3.5, 4.0])  # station barely moves
+    assert set(pt.flag_readings(readings, CFG, reference)["quality_flag"]) == {"ok"}
+    assert set(pt.flag_readings(readings, CFG)["quality_flag"]) == {
+        "ok"
+    }  # no reference: benefit of the doubt
+
+
+def test_repeated_value_while_the_station_moves_is_stuck():
+    readings, reference = _plateau_with_reference([3.0, 12.0, 6.0])  # +9 ug/m3 meanwhile
+    assert set(pt.flag_readings(readings, CFG, reference)["quality_flag"]) == {"pm_stuck"}
 
 
 def test_constant_run_is_broken_by_a_long_gap():
