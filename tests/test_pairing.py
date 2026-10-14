@@ -1,7 +1,9 @@
+from datetime import date
+
 import polars as pl
 import pytest
 
-from aircalib.transform.pairing import haversine_km, pairs_within, weather_links
+from aircalib.transform.pairing import haversine_km, nearest_usable_station, pairs_within, weather_links
 
 
 def _distance(lat1, lon1, lat2, lon2):
@@ -63,3 +65,32 @@ def test_weather_links_measure_distance_from_the_sensor_not_the_station():
     assert out["weather_rank"].to_list() == [1, 2]
     assert out["sensor_weather_km"][0] == pytest.approx(11.12, abs=0.01)
     assert out["station_weather_km"].to_list() == [12.0, 21.0]
+
+
+def test_each_position_segment_gets_its_own_station():
+    jan, feb = date(2024, 1, 1), date(2024, 2, 1)
+    stations = pl.DataFrame(
+        {
+            "sampling_point": ["A", "B"],
+            "station_code": ["SA", "SB"],
+            "country": ["DE", "DE"],
+            "station_type": ["traffic", "background"],
+            "station_area": ["urban", "urban"],
+            "lat": [50.0, 52.0],
+            "lon": [8.0, 13.0],
+        }
+    )
+    availability = pl.DataFrame(
+        {"sampling_point": ["A", "B", "B"], "month": [jan, jan, feb], "valid_hours": [700, 700, 0]}
+    )
+    segments = pl.DataFrame(
+        {
+            "pair_id": ["s-1", "s-2", "s-3"],
+            "lat": [50.005, 52.005, 21.06],  # near A, then near B, then far away (Hanoi)
+            "lon": [8.0, 13.0, 105.83],
+            "months": [[jan], [feb], [feb]],
+        }
+    )
+    out = nearest_usable_station(segments, stations, availability, 3.0, point_id="pair_id").sort("pair_id")
+    # s-2 is near B but B has no valid hour in February: no usable station; s-3 has none in reach.
+    assert out.select("pair_id", "sampling_point").rows() == [("s-1", "A")]

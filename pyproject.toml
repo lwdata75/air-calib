@@ -51,6 +51,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E402", "B018", "PLR2004"]
 "tests/*" = ["PLR2004", "ARG001"]
+# Pandera models: checks are classmethods taking ``cls``; ``Config.unique`` is a plain list by design.
+"src/aircalib/schemas/*" = ["N805", "RUF012"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

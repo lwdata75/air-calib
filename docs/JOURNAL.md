@@ -230,3 +230,89 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : conventions différentes entre l'archive et le firmware.
 - **Contournement** : bronze garde le contenu tel quel ; silver normalisera en minuscules (comme les tables de référence).
 - **Impact** : nul si on le sait ; une jointure naïve sur `sensor_type` aurait tout perdu.
+
+## Étape 3 — Nettoyage (couche silver)
+
+### [2026-10-14] Décision : l'humidité officielle devient l'entrée principale
+- **Constat** : seules 38,5 % des heures-sondes sont fiables, 467 sondes sur 1 126 n'ont aucune heure fiable, et même les sondes saines lisent trop sec (−13 points pour la BME280). L'humidité officielle (DWD, Météo-France) existe pour 100 % des paires appariées.
+- **Pourquoi** : une variable clé ne peut pas reposer sur une source absente deux fois sur trois et biaisée le reste du temps.
+- **Contournement** : `official_humidity` (station officielle la plus proche du capteur) est l'entrée principale ; `local_humidity` n'est renseignée que si elle est fiable (`local_reliable`), comme variable secondaire. L'étape 5 comparera les deux.
+- **Impact** : argument métier : **la correction n'exige pas de sonde d'humidité fonctionnelle**, la station météo publique suffit. Dans les heures-paires utilisables, la sonde locale n'est fiable que 27 % du temps en Allemagne et 32 à 46 % en France.
+
+### [2026-10-14] Aucune ligne supprimée : un statut par mesure, et l'entonnoir calculé à partir des statuts
+- **Constat** : un nettoyage qui supprime des lignes ne peut pas dire après coup pourquoi une heure manque.
+- **Pourquoi** : la note dépend de la traçabilité du nettoyage.
+- **Contournement** : chaque mesure SDS011 (`quality_flag`), heure de référence, heure météo, heure-sonde et heure-paire (`status`) porte `ok` ou la *première* règle qu'elle viole, dans un ordre fixe ; `transform/funnel.py` compte, règle après règle, les lignes, capteurs, paires et stations perdus ; `reports/funnel.md` est régénéré à chaque `pair`. Les contrats Pandera silver refusent tout statut inconnu. Un premier rapport comptait « 1 » ligne par règle (un `pl.lit(1).sum()` qui ne se répète pas dans un `group_by`) : corrigé et couvert par un test avant publication.
+- **Impact** : les 377,95 millions de mesures SDS011 sont dans `silver/sensor_community/pm/` avec leur statut (2,6 Go, autant que bronze).
+
+### [2026-10-14] Particules : uniquement des règles physiques et de cohérence
+- **Constat** : 2,1 % des mesures SDS011 violent une règle. La saturation a une signature précise : PM2.5 = 999,9 **avec** PM10 = 1 999,9 (2,6 M mesures, 360 capteurs). Le firmware écrit −1/−1 en cas d'erreur (0,45 M, 10 capteurs). PM2.5 > PM10 vient à 99,9 % de 2 capteurs (0,79 M). Les dépassements de la plage du SDS011 (> 999,9 µg/m³, 0,2 M) touchent 565 capteurs, avec des pics l'été 2024 (pas au Nouvel An : 0,4 %). Les « doublons » sont surtout des lignes vides jumelles d'une vraie mesure ; 3 286 mesures ont le même horodatage avec des valeurs différentes.
+- **Pourquoi** : pannes et codes du firmware ; PM2.5 est une partie de PM10.
+- **Contournement** : règles dans l'ordre `pm_missing`, `duplicate` (la 1re copie gardée), `duplicate_conflict` (toutes écartées), `pm_negative`, `pm_saturated`, `pm_above_range`, `pm25_above_pm10`, `pm_stuck`. **Aucun filtre statistique** (z-score, IQR) : un pic à 850 µg/m³ dans de l'air propre reste `ok` (test dédié). Seuils dans `particles.*`.
+- **Impact** : aucune règle ne supprime à elle seule plus de 2 capteurs ; les pics par forte humidité, que le modèle doit apprendre à corriger, sont intacts.
+
+### [2026-10-14] Capteurs figés : le seuil d'une heure, justifié par la station
+- **Constat** : les longues séries de valeurs identiques sont toutes des valeurs de panne (0/0, moins de 1 µg/m³, −1, 999,9), pendant que la station de référence mesure 5 à 7 µg/m³ en médiane. Une valeur ≥ 1 µg/m³ ne se répète presque jamais une heure (14 séries de 1 à 3 h sur 6 capteurs en deux ans).
+- **Pourquoi** : un compteur optique dans l'air réel fluctue d'une mesure à l'autre ; une valeur figée est un capteur qui ne mesure plus (ventilateur ou laser).
+- **Contournement** : `particles.stuck_min_hours = 1.0` : (PM10, PM2.5) identiques pendant ≥ 1 h, sans trou de plus d'1 h → `pm_stuck` (3,07 M mesures, 242 capteurs).
+- **Impact** : les séries courtes à 0/0 ou < 1 µg/m³ (≈ 0,96 M mesures) sont gardées : en air propre, un capteur à 0,1 µg/m³ de résolution peut répéter une petite valeur. Limite documentée : ce sont peut-être déjà des pannes naissantes.
+
+### [2026-10-14] Complétude horaire selon la cadence propre de chaque capteur
+- **Constat** : la cadence médiane est de 146 s, mais environ 250 capteurs envoient à 60, 120, 180, 240 ou 300 s ; quelques-uns changent de cadence en cours de période.
+- **Pourquoi** : réglage du firmware par le propriétaire.
+- **Contournement** : cadence = médiane des écarts entre mesures consécutives (coupures > 1 h ignorées), par capteur et par mois ; complétude = mesures valides / (3600 / cadence) ; seuil 75 % (`particles.min_completeness`). Chaque heure garde moyenne, médiane, écart-type et nombre de mesures valides (PM2.5 et PM10).
+- **Impact** : 93,3 % des 15,67 M heures-capteur sont complètes, 5,2 % incomplètes, 1,5 % sans mesure valide (raison dominante : saturation 45 %, capteur figé 37 %).
+
+### [2026-10-14] Capteurs déplacés : un appariement par segment de position
+- **Constat** : 65 capteurs ont plusieurs positions (1 479 segments). 12 segments (10 capteurs, 1,3 M mesures) avaient, à leur ancienne adresse, une autre station plus proche ; 22 segments (19 capteurs, 1,0 M mesures) n'avaient aucune station à 3 km : capteur 84804 à Hanoï, 42694 à Bruxelles jusqu'en avril 2024, d'autres en périphérie.
+- **Pourquoi** : la paire de l'étape 2 était calculée sur la position la plus récente.
+- **Contournement** : segment = suite continue de mesures au même site et aux mêmes coordonnées (revenir à une ancienne position ouvre un nouveau segment) ; chaque segment est apparié avec la même règle qu'à l'étape 1 (`nearest_usable_station`, factorisée et partagée avec la découverte). Une paire est désormais `(capteur, segment) → station`, identifiée par `pair_id`.
+- **Impact** : 42 902 heures-capteur sans station gardent le statut `no_reference_station` au lieu d'être comparées à une station lointaine. Les 12 stations de remplacement étaient déjà téléchargées (aucun téléchargement supplémentaire).
+
+### [2026-10-14] Référence EEA : les petites valeurs négatives validées sont gardées
+- **Constat** : 8 955 heures PM2.5 validées sont négatives (0,18 %, 36 points, médiane −0,79, minimum −6,2) ; une seule passe sous −5 µg/m³. Les codes −1 et −99 vont toujours avec la sentinelle −999. Aucune heure non vérifiée dans la période.
+- **Pourquoi** : bruit de mesure des analyseurs automatiques autour de zéro, accepté par l'agence.
+- **Contournement** : valeurs ≥ `eea.negative_floor_ugm3` (−5) gardées **telles quelles** ; en dessous, `negative_beyond_uncertainty`. Pas de remplacement par 0.
+- **Impact** : remplacer par 0 ou retirer ces heures aurait biaisé la cible vers le haut en air propre ; 2 heures écartées en tout (PM2.5 et PM10).
+
+### [2026-10-14] Contrôle d'horloge : les niveaux trompent, les variations non
+- **Constat** : le premier contrôle automatique (corrélation des **niveaux**, meilleur décalage ≠ 0 → exclusion) rejetait 4 paires sur 20 de l'échantillon et 171 sur 1 440 au complet. Exemple : la paire 32200, excellente, donnait 0,920 à 0 h et 0,921 à +1 h sur janvier 2025. Les paires rejetées avaient presque toutes des corrélations très faibles : le « meilleur » décalage y était du bruit.
+- **Pourquoi** : les niveaux de pollution varient lentement, la courbe de corrélation est plate autour de 0 et son maximum dépend du bruit ou du trajet d'un panache entre station et capteur.
+- **Contournement** : corrélation des **variations d'une heure à l'autre** (pic net au vrai décalage) ; verdict `clock_unverifiable` si < 500 heures ou meilleure corrélation < 0,1, `clock_mismatch` si le meilleur décalage ≠ 0 **et** bat le décalage 0 d'un z de Fisher ≥ 3 (`clock.*`). Même test **par station**, toutes ses paires regroupées (les horodatages des capteurs viennent tous du même serveur : un problème d'heure est un problème de station). Une paire est exclue si elle ou sa station est en décalage. **Contre-épreuve** : sans la correction `Start − 1 h`, le test rejette 1 085 paires vérifiables sur 1 142 et 207 stations sur 216.
+- **Impact** : avec la correction, 29 paires et 7 stations en décalage ; 64 paires exclues (615 040 heures, 4,4 % des heures alors restantes).
+
+### [2026-10-14] Les stations TEOM répondent avec environ une demi-heure de retard
+- **Constat** : 5 des 7 stations en décalage mesurent avec un **TEOM** : DESN020, DESN025, DESN045, DESN061 en Saxe et FR33220 (TEOM-FDMS). Toutes à +1 h, mais la corrélation est **répartie** entre 0 et +1 h (DESN061 : 0,089 et 0,108) au lieu de chuter à 0 comme pour un vrai décalage, et c'est pareil en hiver et en été. DEBY099 (+1 h net, z = 13, un seul capteur) et DEMV007 (−1 h, z = 3,7) restent inexpliquées.
+- **Pourquoi** : probablement la réponse retardée de la microbalance (moyennes glissantes de l'instrument), pas une erreur d'horloge ni l'heure d'été.
+- **Contournement** : la règle décidée s'applique : leurs 52 paires sont exclues (`clock_mismatch_station`). Un décalage d'une demi-heure ne peut pas être corrigé proprement à l'échelle horaire.
+- **Impact** : la Saxe perd 50 de ses 88 paires ; à rediscuter à l'étape 4 (garder ces stations avec une variable « méthode de mesure » est une option).
+
+### [2026-10-14] 298 paires « invérifiables » gardées
+- **Constat** : pour 298 paires (2,25 M heures), les variations horaires du capteur ne suivent pas la station (corrélation médiane 0,04), souvent des capteurs lointains ou bruités.
+- **Pourquoi** : un capteur bruité ou une station de type différent (trafic contre fond) n'a pas de variations communes exploitables pour lire un décalage.
+- **Contournement** : pas d'exclusion (rien ne prouve un problème d'heure, et l'horloge des capteurs est celle du serveur) ; le drapeau `clock_flag` est conservé.
+- **Impact** : limite à suivre à l'étape 4 : ces paires seront probablement les moins bien corrigées.
+
+### [2026-10-14] Sondes d'humidité : valeurs figées pendant 3 heures ou plus
+- **Constat** : certaines sondes répètent exactement la même humidité utilisable (souvent 98,7 %) pendant des heures. Pendant les séries de ≥ 3 h, l'humidité officielle voisine varie de 6 à 50 points en médiane, contre 2 points pour les séries de moins de 2 h.
+- **Pourquoi** : sonde bloquée juste sous la saturation.
+- **Contournement** : statut `stuck` si une valeur utilisable est identique pendant ≥ `humidity.stuck_min_hours` (3 h) ; 16 sites ont deux sondes, la plus fiable selon `humidity.probe_preference` est retenue.
+- **Impact** : 0,86 M mesures en plus écartées ; 4,62 M heures-sondes fiables sur 11,99 M (38,5 %).
+
+### [2026-10-14] Station météo : la plus proche du capteur, avec une station de secours heure par heure
+- **Constat** : pour 74 paires, la station officielle la plus proche du capteur n'est pas la plus proche de la station EEA. La station principale manque d'humidité 5 % des heures en Allemagne.
+- **Pourquoi** : les stations météo avaient été choisies depuis la station EEA, jusqu'à 3 km du capteur.
+- **Contournement** : station principale = la plus proche du **capteur** ; deux stations à moins de 0,5 km d'écart (`weather.tie_km`) sont départagées par la complétude ; une heure manquante est prise à l'autre station (`weather_fallback`, distance de la station réellement utilisée dans `sensor_weather_km`).
+- **Impact** : 3 339 heures seulement sans humidité officielle ; distance médiane capteur → station météo 6,4 km.
+
+### [2026-10-14] Bilan silver : 13,28 millions d'heures-paires utilisables
+- **Constat** : des 15,67 M heures-capteur, il reste 13,28 M heures-paires utilisables (84,7 %) : 1 379 paires, 1 330 capteurs, 290 stations. DE near 5,34 M (556 paires, 171 stations), DE far 6,86 M (680 paires, 185 stations), FR near 0,40 M (48 paires), FR far 0,68 M (95 paires). 139 stations ont des capteurs utilisables dans les deux bandes.
+- **Pourquoi** : —
+- **Contournement** : `cv_group` (= code de la station) est porté par chaque heure-paire pour la validation croisée groupée (étape 6).
+- **Impact** : la bande « far » est plus riche que la bande « near » ; le test distance aura beaucoup de données. Les stations trafic font 53 % des heures allemandes.
+
+### [2026-10-14] Disque : 9,8 Go, proche du plafond final de 10 Go
+- **Constat** : bronze 5,0 Go, silver 3,9 Go (dont 2,6 Go de mesures SDS011 avec statut), bruts EEA conservés 0,85 Go.
+- **Pourquoi** : garder un statut par mesure double le volume des mesures brutes.
+- **Contournement** : à l'étape 5, la couche gold ne gardera que les colonnes utiles des heures-paires `ok` ; si besoin, les bruts EEA (relus seulement par la découverte) pourront être supprimés.
+- **Impact** : budget à surveiller ; pic du calcul silver sous 11 Go, loin des 20 Go.

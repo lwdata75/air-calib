@@ -42,6 +42,56 @@ def pairs_within(
     )
 
 
+def nearest_usable_station(
+    points: pl.DataFrame,
+    stations: pl.DataFrame,
+    availability: pl.DataFrame,
+    max_km: float,
+    *,
+    point_id: str,
+) -> pl.DataFrame:
+    """For each point (a sensor, or one position segment of a sensor), its nearest *usable* station.
+
+    Rule (1 sensor = 1 station): among the stations closer than ``max_km`` that have
+    verified hours during the point's ``months``, keep the nearest one (ties broken
+    by sampling point id). One sampling point per station: the one with the most
+    valid hours. ``points`` needs ``point_id, lat, lon, months`` (list of month starts);
+    ``availability`` has ``sampling_point, month, valid_hours``.
+
+    Adds ``sampling_point, station_code, country, station_type, station_area,
+    station_lat, station_lon, distance_km, overlap_hours`` (valid station hours during
+    those months) and ``n_stations_within`` (usable stations in reach). Points
+    without a usable station are dropped.
+    """
+    best_points = (
+        availability.group_by("sampling_point")
+        .agg(total_hours=pl.col("valid_hours").sum())
+        .join(stations.select("sampling_point", "station_code"), on="sampling_point")
+        .sort("total_hours", "sampling_point", descending=[True, False])
+        .unique("station_code", keep="first")
+        .select("sampling_point")
+    )
+    st = stations.join(best_points, on="sampling_point").select(
+        "sampling_point", "station_code", "country", "station_type", "station_area", "lat", "lon"
+    )
+    couples = pairs_within(points, st, max_km).collect()
+    overlap = (
+        couples.select(point_id, "sampling_point", "months")
+        .explode("months")
+        .rename({"months": "month"})
+        .join(availability, on=["sampling_point", "month"], how="left")
+        .group_by(point_id, "sampling_point")
+        .agg(overlap_hours=pl.col("valid_hours").fill_null(0).sum())
+    )
+    return (
+        couples.join(overlap, on=[point_id, "sampling_point"], how="left")
+        .filter(pl.col("overlap_hours") > 0)
+        .with_columns(n_stations_within=pl.len().over(point_id))
+        .sort("distance_km", "sampling_point")
+        .unique(point_id, keep="first")
+    )
+
+
 def nearest_k(
     points: pl.DataFrame,
     candidates: pl.DataFrame,
@@ -66,16 +116,16 @@ def nearest_k(
     )
 
 
-def weather_links(pairs: pl.DataFrame, weather: pl.DataFrame) -> pl.DataFrame:
+def weather_links(pairs: pl.DataFrame, weather: pl.DataFrame, pair_id: str = "sensor_id") -> pl.DataFrame:
     """Official weather stations of each pair, with the sensor → weather-station distance.
 
-    ``pairs`` has ``sensor_id, sampling_point, sensor_lat, sensor_lon``; ``weather`` has
+    ``pairs`` has ``<pair_id>, sampling_point, sensor_lat, sensor_lon``; ``weather`` has
     ``sampling_point, source, station_id, rank, lat, lon, distance_km`` (distance to
     the EEA station, used to choose it). The humidity fallback is measured at the
     weather station, so the distance that matters for the sensor is recomputed.
     """
     return (
-        pairs.select("sensor_id", "sampling_point", "sensor_lat", "sensor_lon")
+        pairs.select(pair_id, "sampling_point", "sensor_lat", "sensor_lon")
         .join(weather, on="sampling_point", how="inner")
         .with_columns(
             sensor_weather_km=haversine_km(
@@ -83,7 +133,7 @@ def weather_links(pairs: pl.DataFrame, weather: pl.DataFrame) -> pl.DataFrame:
             )
         )
         .select(
-            "sensor_id",
+            pair_id,
             "sampling_point",
             "source",
             weather_station_id="station_id",
@@ -91,5 +141,5 @@ def weather_links(pairs: pl.DataFrame, weather: pl.DataFrame) -> pl.DataFrame:
             sensor_weather_km="sensor_weather_km",
             station_weather_km="distance_km",
         )
-        .sort("sensor_id", "weather_rank")
+        .sort(pair_id, "weather_rank")
     )

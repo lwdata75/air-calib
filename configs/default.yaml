@@ -90,12 +90,34 @@ eea:
   keep_raw: true
   # Bronze keeps the study period plus this margin (Start is on the station clock).
   bronze_margin_days: 1
+  # Measured in step 1 (lagged correlation, DE and FR): UTC hour = Start - clock_offset_h.
+  clock_offset_h: 1
+  # Validated hours may be slightly negative (instrument noise around zero: 0.18 % of PM2.5 hours,
+  # median -0.8 ug/m3). They are kept as reported (clipping or dropping them would bias the target
+  # upwards in clean air); below this floor a value is no longer noise and is flagged.
+  negative_floor_ugm3: -5.0
 
 pairing:
   # Rule: 1 sensor = 1 station, the nearest one with verified data while the sensor is active.
   radius_download_km: 3.0   # every pair up to this distance is downloaded
   radius_train_km: 1.5      # pairs <= 1.5 km train the model; (1.5, 3] km = "distance" test set
   sensor_types: [sds011]    # PMS/SPS sensors excluded (2 % of pairs, other optics)
+
+particles:
+  # SDS011 specification range for PM2.5 and PM10 (ug/m3).
+  max_ugm3: 999.9
+  # Saturation signature seen in the archive: PM2.5 = 999.9 together with PM10 = 1999.9 (firmware cap).
+  pm25_saturation_ugm3: 999.9
+  pm10_saturation_ugm3: 1999.9
+  # Identical (PM10, PM2.5) readings lasting at least this long = stuck sensor. Real air above
+  # 1 ug/m3 never stays identical for an hour; the long plateaus are 0/0, < 1, -1 and 999.9 while
+  # the reference station reads 5-7 ug/m3 (notebook 03).
+  stuck_min_hours: 1.0
+  # A sensor's cadence = median gap between consecutive readings, per sensor and month, ignoring
+  # gaps longer than this (outages).
+  cadence_max_gap_s: 3600
+  # An hour is kept when its valid readings reach this share of the readings expected at the cadence.
+  min_completeness: 0.75
 
 humidity:
   # A reading is classified as: missing (null or NaN), out of range (< 0 or > max_pct), stuck low
@@ -115,6 +137,11 @@ humidity:
   # distribution, and above it even the usable hours drift away from the official station
   # (DHT22 median bias +13.8 points, BME280 +2.7 and growing).
   dead_month_share: 0.3
+  # A usable humidity value repeated identically for at least this long is stuck: during such runs
+  # the official station moved by 6 to 50 points (median), against 2 points for runs under 2 h.
+  stuck_min_hours: 3.0
+  # Several probes on one site (16 sites have a DHT22 and a BME280): the first reliable one wins.
+  probe_preference: [sht85, sht31, sht30, bme280, dht22, htu21d]
 
 weather:
   # Official weather stations used as a fallback for the sensor's own humidity probe.
@@ -123,6 +150,21 @@ weather:
   # Clock check of weather stations against the probes' temperature (10-min windows).
   clock_check_step_min: 10
   clock_check_max_offset_min: 120
+  # Per pair, the official station nearest to the *sensor* is chosen; two stations closer than this
+  # to each other in distance are a tie, broken by humidity completeness. An hour missing at the
+  # chosen station falls back to the other one.
+  tie_km: 0.5
+
+clock:
+  # Automatic check on every pair (silver): lagged correlation of hourly PM2.5, sensor vs station.
+  max_lag_h: 3
+  # The test uses hour-to-hour changes (sharp peak at the true offset). A pair is "unverifiable" with
+  # fewer common hours than min_hours, or when even its best correlation is below min_r (its changes
+  # carry no readable timing). A non-zero best lag is a mismatch only when it beats lag 0 by
+  # min_z (Fisher z, as if the two correlations were independent: conservative here).
+  min_hours: 500
+  min_r: 0.1
+  min_z: 3.0
 
 dwd:
   # Hourly 2 m temperature + relative humidity (quality-controlled "historical" release).

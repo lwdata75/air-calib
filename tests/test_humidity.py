@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import polars as pl
 
@@ -13,6 +13,7 @@ from aircalib.transform.humidity import (
     reading_status,
     saturated_vs_official,
     status_shares,
+    with_status,
 )
 from aircalib.transform.positions import position_history
 
@@ -46,7 +47,12 @@ def test_nan_is_not_saturated():
 
 def test_status_shares_ignore_missing_values():
     frame = pl.DataFrame(
-        {"t": ["dht22"] * 5 + ["bme280"] * 2, "humidity": [99.9, 100.0, 55.0, None, float("nan"), 99.8, 1.0]}
+        {
+            "t": ["dht22"] * 5 + ["bme280"] * 2,
+            "sensor_id": [1] * 5 + [2] * 2,
+            "timestamp": [datetime(2024, 1, 1, h) for h in range(7)],
+            "humidity": [99.9, 100.0, 55.0, None, float("nan"), 99.8, 1.0],
+        }
     )
     out = status_shares(frame, ["t"], CFG).collect()
     dht = out.filter(pl.col("t") == "dht22").row(0, named=True)
@@ -71,6 +77,7 @@ def _probe(hour_values):
             "sensor_type": ["DHT22"] * len(rows),
             "timestamp": [datetime(2024, 1, 1, h, m) for h, m, _ in rows],
             "humidity": [v for _, _, v in rows],
+            "temperature": [10.0] * len(rows),
         },
         schema_overrides={"humidity": pl.Float64},
     )
@@ -153,3 +160,19 @@ def test_dead_months_lose_all_hours_healthy_months_lose_only_faulty_ones():
 def test_month_exactly_at_threshold_is_healthy():
     monthly = monthly_quality(_hourly(1, 1, ["saturated", None])).collect()
     assert classify_months(monthly, 0.5).collect()["status"].item() == "healthy"  # 50 % is not "more than"
+
+
+def test_identical_humidity_for_hours_is_stuck():
+    hours = int(CFG.stuck_min_hours) + 1
+    flat = [datetime(2024, 1, 1, 0) + timedelta(minutes=10 * i) for i in range(hours * 6)]
+    moving = [flat[-1] + timedelta(minutes=10 * (i + 1)) for i in range(6)]
+    frame = pl.DataFrame(
+        {
+            "sensor_id": [1] * (len(flat) + len(moving)),
+            "timestamp": flat + moving,
+            "humidity": [98.7] * len(flat) + [80.0 + i for i in range(6)],
+        }
+    )
+    status = with_status(frame, CFG).collect()["status"].to_list()
+    assert set(status[: len(flat)]) == {"stuck"}  # 98.7 % for hours while the air changes
+    assert set(status[len(flat) :]) == {"usable"}

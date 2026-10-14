@@ -14,6 +14,8 @@ Every reading gets one status (thresholds from ``configs/default.yaml``):
 * ``out_of_range``: below 0 or above ``max_pct``;
 * ``stuck_low``: below ``floor_pct`` (official stations almost never read that dry);
 * ``saturated``: at or above ``saturation_pct``;
+* ``stuck``: a usable value repeated identically for ``stuck_min_hours`` or more
+  (needs the readings in time order, see ``with_status``);
 * ``usable``: everything else.
 """
 
@@ -24,10 +26,11 @@ import itertools
 import polars as pl
 
 from aircalib.config import Humidity
+from aircalib.transform.runs import in_constant_run
 
 MISSING, USABLE = "missing", "usable"
-OUT_OF_RANGE, STUCK_LOW, SATURATED = "out_of_range", "stuck_low", "saturated"
-FAULTS = (SATURATED, STUCK_LOW, OUT_OF_RANGE)
+OUT_OF_RANGE, STUCK_LOW, SATURATED, STUCK = "out_of_range", "stuck_low", "saturated", "stuck"
+FAULTS = (SATURATED, STUCK, STUCK_LOW, OUT_OF_RANGE)  # order = priority when shares tie
 
 
 def is_saturated(rh: pl.Expr, saturation_pct: float) -> pl.Expr:
@@ -50,16 +53,29 @@ def reading_status(rh: pl.Expr, cfg: Humidity) -> pl.Expr:
     )
 
 
+def with_status(lf: pl.LazyFrame | pl.DataFrame, cfg: Humidity) -> pl.LazyFrame:
+    """Readings sorted by probe and time with their ``status``, stuck runs included."""
+    usable = pl.col("status") == USABLE
+    stuck = in_constant_run(
+        usable, ["humidity"], by="sensor_id", time_col="timestamp", min_hours=cfg.stuck_min_hours
+    )
+    return (
+        lf.lazy()
+        .filter(pl.col("timestamp").is_not_null())
+        .sort("sensor_id", "timestamp")
+        .with_columns(status=reading_status(pl.col("humidity"), cfg))
+        .with_columns(status=pl.when(stuck).then(pl.lit(STUCK)).otherwise(pl.col("status")))
+    )
+
+
 def _shares(status: pl.Expr) -> list[pl.Expr]:
     return [(status == s).mean().alias(f"{s}_share") for s in (*FAULTS, USABLE)]
 
 
 def status_shares(lf: pl.LazyFrame | pl.DataFrame, by: list[str], cfg: Humidity) -> pl.LazyFrame:
     """Per group: readings present (``n``), missing ones, and the share of each status among the present."""
-    status = reading_status(pl.col("humidity"), cfg)
     return (
-        lf.lazy()
-        .with_columns(status=status)
+        with_status(lf, cfg)
         .group_by(by)
         .agg(
             *_shares(pl.col("status").filter(pl.col("status") != MISSING)),
@@ -78,10 +94,12 @@ def age_class(age_years: pl.Expr, breaks: list[float]) -> pl.Expr:
     return expr.when(age_years >= breaks[-1]).then(pl.lit(f">={breaks[-1]:g}"))
 
 
-def hourly_humidity(lf: pl.LazyFrame | pl.DataFrame, cfg: Humidity) -> pl.LazyFrame:
-    """Per probe and UTC hour, over the readings present:
+def hourly_humidity(
+    lf: pl.LazyFrame | pl.DataFrame, cfg: Humidity, by: tuple[str, ...] = ("sensor_id", "sensor_type")
+) -> pl.LazyFrame:
+    """Per probe (``by``) and UTC hour, over the readings present:
 
-    * ``humidity``: mean of the usable readings (null when there are none);
+    * ``humidity``, ``temperature``: means over the usable readings (null when there are none);
     * ``raw_humidity``: mean of the physically possible readings (0–``max_pct``), faults included,
       to show what the probe claimed;
     * the share of each status, ``faulty`` (more than ``faulty_hour_share`` not usable) and the
@@ -90,29 +108,24 @@ def hourly_humidity(lf: pl.LazyFrame | pl.DataFrame, cfg: Humidity) -> pl.LazyFr
     rh = pl.col("humidity")
     status = pl.col("status")
     possible = status != OUT_OF_RANGE
-    sat, low, oor = (pl.col(f"{s}_share") for s in FAULTS)
+    shares = [pl.col(f"{s}_share") for s in FAULTS]
+    worst = pl.max_horizontal(shares)
+    fault = pl.when(~pl.col("faulty")).then(None)
+    for name, share in zip(FAULTS, shares, strict=True):
+        fault = fault.when(share == worst).then(pl.lit(name))
     return (
-        lf.lazy()
-        .filter(pl.col("timestamp").is_not_null())
-        .with_columns(status=reading_status(rh, cfg))
+        with_status(lf, cfg)
         .filter(status != MISSING)
-        .group_by("sensor_id", "sensor_type", hour=pl.col("timestamp").dt.truncate("1h"))
+        .group_by(*by, hour=pl.col("timestamp").dt.truncate("1h"))
         .agg(
             *_shares(status),
             humidity=rh.filter(status == USABLE).mean(),
+            temperature=pl.col("temperature").filter(status == USABLE).mean(),
             raw_humidity=rh.filter(possible).mean(),
             n=pl.len(),
         )
         .with_columns(faulty=(1 - pl.col(f"{USABLE}_share")) > cfg.faulty_hour_share)
-        .with_columns(
-            fault=pl.when(~pl.col("faulty"))
-            .then(None)
-            .when((sat >= low) & (sat >= oor))
-            .then(pl.lit(SATURATED))
-            .when(low >= oor)
-            .then(pl.lit(STUCK_LOW))
-            .otherwise(pl.lit(OUT_OF_RANGE))
-        )
+        .with_columns(fault=fault)
     )
 
 

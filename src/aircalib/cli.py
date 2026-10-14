@@ -19,6 +19,9 @@ from aircalib.ingest import bronze as bronze_stage
 from aircalib.ingest import discovery, plan, report
 from aircalib.ingest import download as download_stage
 from aircalib.logging import console, setup_logging
+from aircalib.silver import pairs as pair_stage
+from aircalib.silver import report as silver_report
+from aircalib.silver import sources as silver_stage
 
 app = typer.Typer(help="Calibrate low-cost PM sensors against EEA reference stations.", no_args_is_help=True)
 
@@ -65,12 +68,29 @@ def bronze(sample: SampleOpt = False) -> None:
     console.print(f"report: {report.write(settings)}")
 
 
+@app.command()
+def silver(sample: SampleOpt = False) -> None:
+    """Step 3a: flag every reading and hour (no row deleted), aggregate each source to UTC hours."""
+    settings = _settings(sample)
+    silver_stage.run(settings, plan.load_plan(settings))
+
+
+@app.command()
+def pair(sample: SampleOpt = False) -> None:
+    """Step 3b: pair position segments with stations, join sources, check clocks, write the funnel."""
+    settings = _settings(sample)
+    pair_stage.build(settings, plan.load_plan(settings))
+    console.print(f"funnel: {silver_report.write(settings)}")
+
+
 @app.command(name="all")
 def run_all(sample: SampleOpt = False) -> None:
     """Run every implemented stage in order."""
     discover(sample=sample)
     download(sample=sample)
     bronze(sample=sample)
+    silver(sample=sample)
+    pair(sample=sample)
 
 
 @app.command()

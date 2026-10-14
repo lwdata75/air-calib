@@ -9,8 +9,8 @@ une station officielle (EEA), et jusqu'à quelle distance d'une station la corre
 - **Appariement : 1 capteur = 1 station** (la plus proche avec des heures vérifiées), SDS011 seul.
   Téléchargement ≤ 3 km ; entraînement sur la bande `near` (≤ 1,5 km) ; bande `far` (1,5–3 km) = test « distance ».
   GroupKFold par station sur **toutes** les distances. Évaluations toujours rapportées **par type de station**.
-- Cible : PM2.5 horaire de la station EEA (E1a vérifié). Entrées : PM brut + humidité/température
-  au capteur (sonde météo du même site `location`) + humidité officielle (DWD / Météo-France) en secours + contexte.
+- Cible : PM2.5 horaire de la station EEA (E1a vérifié). Entrées : PM brut + **humidité officielle (DWD / Météo-France),
+  entrée principale** + humidité de la sonde du même site seulement si fiable (variable secondaire) + contexte.
 - Humidité saturée (≥ 99,9 %) ou figée (< 5 %, hors bornes, `NaN`) = **manquante** (jamais une vraie valeur) ;
   mois-sonde « mort » si > 30 % d'heures en défaut (`humidity.dead_month_share`) ; κ-Köhler jamais appliqué au-delà
   de `physics.rh_max_pct`.
@@ -47,6 +47,10 @@ une station officielle (EEA), et jusqu'à quelle distance d'une station la corre
   (on le note au journal et on prévient).
 - Itérer en `--sample` avant le volume complet. Commit propre (anglais) à la fin de chaque étape.
 
+- Nettoyage : **aucune ligne supprimée**, un statut par mesure/heure (`quality_flag` / `status`), entonnoir calculé
+  à partir des statuts ; règles physiques et de cohérence seulement, **jamais de filtre statistique** sur les particules.
+- Une paire = `(capteur, segment de position) → station` (`pair_id`) ; `cv_group` = code de la station (GroupKFold).
+
 ## Architecture (médaillon)
 `sources → data/raw (temporaire) → data/bronze (Parquet zstd, contenu inchangé + manifeste)
 → data/silver (nettoyé, horaire UTC, particules+météo jointes) → data/gold (paires × heures + features)
@@ -54,6 +58,9 @@ une station officielle (EEA), et jusqu'à quelle distance d'une station la corre
 tables de référence du plan (paires, sondes, stations météo) : `data/bronze/reference/`.
 `--sample` = mêmes commandes sur `data/sample/` (10 capteurs par pays, un mois : `sample.month`).
 Manifestes JSONL : `raw/<source>/_manifest.jsonl` (téléchargé) et `bronze/<source>/_manifest.jsonl` (converti).
+Silver : `silver/sensor_community/{pm/<id>.parquet, pm_hourly, segments, humidity_hourly}`, `silver/eea/hourly`,
+`silver/weather/hourly`, `silver/pairs/{segment_pairs, weather_choice, clock_check*, pair_hours}` ; règles pures dans
+`transform/`, étapes dans `silver/`, contrats dans `schemas/silver.py`.
 
 ## Faits vérifiés sur les vraies données (détails dans docs/JOURNAL.md)
 - Archive Sensor.Community : années passées en `/<AAAA>/<AAAA-MM-JJ>/…csv.gz` (gzip !), année en
@@ -70,6 +77,9 @@ Manifestes JSONL : `raw/<source>/_manifest.jsonl` (téléchargé) et `bronze/<so
 - Pièges vus en vrai : `NaN` (texte `nan`) ≠ vide et Polars le classe au-dessus de tout (`NaN >= 99.9` est vrai) ;
   virgule décimale chez certains firmwares ; `sensor_type` en MAJUSCULES dans le contenu ; capteurs déplacés (un
   capteur était à Hanoï avant Magdebourg). Horloges DWD et Météo-France vérifiées UTC (pas de saut hiver/été).
+- SDS011 : saturation = PM2.5 999,9 avec PM10 1 999,9 ; code d'erreur −1/−1 ; cadences de 60 à 300 s (médiane 146 s).
+- Contrôle d'horloge sur les *variations* horaires (pas les niveaux), par paire et par station ; les stations TEOM
+  (Saxe, FR33220) répondent avec ≈ ½ h de retard et sont exclues par la règle.
 
 ## Convention horaire du projet
 Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

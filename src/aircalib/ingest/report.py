@@ -49,6 +49,15 @@ def sensor_community_summary(raw: pl.DataFrame, bronze: pl.DataFrame) -> pl.Data
     return dl.join(conv, on="kind", how="left").sort("kind")
 
 
+def _cell(value: object) -> str:
+    """Markdown cell: thousands separators; small floats (correlations, z) keep 3 decimals."""
+    if isinstance(value, float):
+        return f"{value:,.3f}" if abs(value) < 10 else f"{value:,.1f}"
+    if isinstance(value, int):
+        return f"{value:,}"
+    return "" if value is None else str(value)
+
+
 def _table(frame: pl.DataFrame) -> str:
     if frame.is_empty():
         return "_(rien)_\n"
@@ -56,9 +65,7 @@ def _table(frame: pl.DataFrame) -> str:
     sep = "|" + "---|" * frame.width
     rows = []
     for row in frame.iter_rows():
-        cells = [
-            f"{v:,.1f}" if isinstance(v, float) else f"{v:,}" if isinstance(v, int) else str(v) for v in row
-        ]
+        cells = [_cell(v) for v in row]
         rows.append("| " + " | ".join(cells) + " |")
     return "\n".join([head, sep, *rows]) + "\n"
 

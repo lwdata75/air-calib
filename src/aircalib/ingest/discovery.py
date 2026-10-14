@@ -30,7 +30,7 @@ from aircalib.ingest import sensor_community as sc
 from aircalib.ingest.http import PoliteClient, polite_client
 from aircalib.logging import console, get_logger
 from aircalib.transform.hourly import hourly_mean, lagged_correlation
-from aircalib.transform.pairing import pairs_within
+from aircalib.transform.pairing import nearest_usable_station, pairs_within
 
 log = get_logger(__name__)
 
@@ -391,37 +391,12 @@ def pair_table(
     humidity = inventory.filter(pl.col("kind") == "humidity", ~pl.col("indoor")).select(
         "location_id", hum_months=pl.col("months")
     )
-    # Keep one hourly sampling point per station: the one with the most valid hours.
-    best_points = (
-        availability.group_by("sampling_point")
-        .agg(total_hours=pl.col("valid_hours").sum())
-        .join(stations.select("sampling_point", "station_code"), on="sampling_point")
-        .sort("total_hours", "sampling_point", descending=[True, False])
-        .unique("station_code", keep="first")
-        .select("sampling_point")
-    )
-    st = stations.join(best_points, on="sampling_point").select(
-        "sampling_point", "station_code", "country", "station_type", "station_area", "lat", "lon"
-    )
-    couples = pairs_within(
-        pm.select("sensor_id", "sensor_type", "location_id", "months", "lat", "lon"), st, max_km
-    ).collect()
-
-    overlap = (
-        couples.select("sensor_id", "sampling_point", "months")
-        .explode("months")
-        .rename({"months": "month"})
-        .join(availability, on=["sampling_point", "month"], how="left")
-        .group_by("sensor_id", "sampling_point")
-        .agg(overlap_hours=pl.col("valid_hours").fill_null(0).sum())
-    )
-    usable = couples.join(overlap, on=["sensor_id", "sampling_point"], how="left").filter(
-        pl.col("overlap_hours") > 0
-    )
-    nearest = (
-        usable.with_columns(n_stations_within=pl.len().over("sensor_id"))
-        .sort("distance_km", "sampling_point")
-        .unique("sensor_id", keep="first")
+    nearest = nearest_usable_station(
+        pm.select("sensor_id", "sensor_type", "location_id", "months", "lat", "lon"),
+        stations,
+        availability,
+        max_km,
+        point_id="sensor_id",
     )
     with_humidity = (
         nearest.select("sensor_id", "location_id", "months")

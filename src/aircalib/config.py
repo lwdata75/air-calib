@@ -135,6 +135,8 @@ class Eea(BaseModel):
     missing_sentinel: float
     keep_raw: bool
     bronze_margin_days: int
+    clock_offset_h: int
+    negative_floor_ugm3: float
 
 
 class Pairing(BaseModel):
@@ -149,6 +151,15 @@ class Pairing(BaseModel):
         return self
 
 
+class Particles(BaseModel):
+    max_ugm3: float
+    pm25_saturation_ugm3: float
+    pm10_saturation_ugm3: float
+    stuck_min_hours: float
+    cadence_max_gap_s: int
+    min_completeness: float
+
+
 class Humidity(BaseModel):
     saturation_pct: float
     max_pct: float
@@ -156,6 +167,8 @@ class Humidity(BaseModel):
     age_breaks_years: list[float]
     faulty_hour_share: float
     dead_month_share: float
+    stuck_min_hours: float
+    probe_preference: list[str]
 
 
 class Weather(BaseModel):
@@ -163,6 +176,14 @@ class Weather(BaseModel):
     max_distance_km: float
     clock_check_step_min: int
     clock_check_max_offset_min: int
+    tie_km: float
+
+
+class Clock(BaseModel):
+    max_lag_h: int
+    min_hours: int
+    min_r: float
+    min_z: float
 
 
 class Dwd(BaseModel):
@@ -211,8 +232,10 @@ class Settings(BaseSettings):
     discovery: Discovery
     eea: Eea
     pairing: Pairing
+    particles: Particles
     humidity: Humidity
     weather: Weather
+    clock: Clock
     dwd: Dwd
     meteo_france: MeteoFrance
     physics: Physics
