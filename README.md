@@ -13,7 +13,7 @@ jamais vues**, avec les cibles de performance de l'agence américaine de l'envir
 ## Par où commencer
 
 Ouvrez **[`notebooks/00_synthese_du_projet.ipynb`](notebooks/00_synthese_du_projet.ipynb)**. Il raconte tout le
-projet en dix sections, en quelques minutes de lecture, et s'exécute en quelques secondes **sans aucune donnée** (il ne
+projet en dix sections, en quelques minutes de lecture, et s'exécute en moins de 10 secondes **sans aucune donnée** (il ne
 lit que les petits fichiers de [`reports/results/`](reports/results/) et les figures de
 [`reports/figures/`](reports/figures/)). Chaque section renvoie au notebook détaillé qui contient la preuve.
 
@@ -189,8 +189,8 @@ OpenMP fournie avec scikit-learn.
 ```bash
 git clone https://github.com/lwdata75/air-calib.git && cd air-calib
 make setup      # uv sync --frozen : l'environnement exact de uv.lock
-make test       # 123 tests hors ligne, quelques secondes
-make sample     # tout le pipeline sur 10 capteurs par pays et un mois
+make test       # 123 tests hors ligne (≈ 15 s)
+make sample     # tout le pipeline sur 10 capteurs par pays et un mois (≈ 7 min, 0,4 Go, réseau requis)
 make data       # volume complet : ≈ 3 h de téléchargement, 13 min de bronze, 5 min de silver et gold (≈ 9 Go)
 make train      # étape 6 : échelle de modèles, études annexes, modèle final (≈ 1 h 30, suivi MLflow)
 make evaluate   # étape 7 : temps, distance, France, découpages, intervalle (≈ 30 min)

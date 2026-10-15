@@ -688,3 +688,13 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : l'option retire la ligne du projet lui-même.
 - **Contournement** : `make requirements` génère maintenant la ligne `-e .` (paquet installé en mode modifiable). Version 1.0.0, licence MIT dans `pyproject.toml` et `LICENSE`.
 - **Impact** : une installation avec pip seul suffit pour lancer les notebooks et la ligne de commande (test de reproductibilité ci-dessous).
+
+### [2026-10-15] Test de reproductibilité depuis un clone neuf
+- **Constat** : deux `git clone` neufs du dépôt public, dans un dossier temporaire :
+  - **uv** : `uv sync --frozen` sans erreur ; notebook 00 exécuté sans aucune donnée en 7 s ; `make test` : 123 tests réussis en 12 s ; `make sample` : tout le pipeline (découverte, téléchargement, bronze, silver, appariement, gold) en 6 min 50 s, 0,4 Go ;
+  - **pip seul** (Python 3.12, `python -m venv`) : `pip install -r requirements.txt` en 28 s ; notebook 00 en 4 s ; 123 tests réussis.
+  
+  Avec pip, `import lightgbm` seul échoue sur macOS (pas d'OpenMP système).
+- **Pourquoi** : la roue LightGBM pour macOS ne fournit pas `libomp` (voir l'entrée de l'étape 6).
+- **Contournement** : la commande `train` appelle `ensure_openmp()`, qui retrouve le `libomp.dylib` livré avec scikit-learn. Vérifié dans l'environnement pip : LightGBM s'entraîne. Les notebooks n'importent pas LightGBM.
+- **Impact** : le dépôt se relance tel quel avec uv ou avec pip. Sur l'échantillon (20 paires, un mois), le modèle physique s'ajuste mal ($a = 0{,}61$, $\kappa = 0$) : c'est un jeu d'essai de la chaîne, pas un résultat.
