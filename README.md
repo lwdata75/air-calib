@@ -51,13 +51,13 @@ bronze 5,3 Go, silver 2,7 Go, gold 1,2 Go ([`reports/results/volumes_couches.csv
 ## Le pipeline
 
 ```mermaid
-flowchart LR
-    S["4 sources ouvertes<br/>≈ 1,2 million de fichiers"] --> R["raw/<br/>fichiers téléchargés<br/>(supprimés après conversion)"]
-    R --> B["bronze/<br/>Parquet, contenu inchangé<br/>+ manifestes (5,3 Go)"]
-    B --> SV["silver/<br/>un statut par mesure,<br/>heures UTC, paires (2,7 Go)"]
-    SV --> G["gold/<br/>heures-paires utilisables<br/>+ 48 variables (1,2 Go)"]
-    G --> M["modèles<br/>suivis dans MLflow"]
-    M --> RES["reports/results/<br/>CSV versionnés"]
+flowchart TD
+    S["4 sources ouvertes"] --> R["raw/ : fichiers bruts"]
+    R --> B["bronze/ : Parquet brut"]
+    B --> SV["silver/ : nettoyé, horaire"]
+    SV --> G["gold/ : 48 variables"]
+    G --> M["modèles + MLflow"]
+    M --> RES["reports/results/ : CSV"]
 ```
 
 Le nettoyage **ne supprime aucune ligne** : chaque mesure garde un statut (`ok` ou la première règle qu'elle viole), et
@@ -181,8 +181,16 @@ stations conformes, culmine au bon alignement ; les stations TEOM répondent ave
 ## Reproduire
 
 **Prérequis** : Python 3.12, environ 20 Go de disque libre au plus fort (10 Go au final), une connexion internet pour
-le téléchargement. Testé sur macOS (Apple Silicon) ; sur macOS, LightGBM utilise automatiquement la bibliothèque
-OpenMP fournie avec scikit-learn.
+le téléchargement. Testé sur macOS (Apple Silicon).
+
+**Sur macOS**, installez d'abord OpenMP :
+
+```bash
+brew install libomp
+```
+
+LightGBM a besoin de la bibliothèque OpenMP, que macOS ne fournit pas. Sans Homebrew, la commande `train` se rabat sur
+la copie d'OpenMP livrée avec scikit-learn, mais un simple `import lightgbm` (dans un notebook, par exemple) échouerait.
 
 **Avec [uv](https://docs.astral.sh/uv/)** (recommandé) :
 
@@ -224,7 +232,7 @@ des problèmes et des décisions ([`docs/JOURNAL.md`](docs/JOURNAL.md)), y compr
 
 ## Auteurs
 
-[NOMS]
+[NOMS DU GROUPE]
 
 ## Références
 
