@@ -550,3 +550,109 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : les prédictions hors pli sont gardées pour pouvoir recalculer les métriques sans réentraîner (`python -m aircalib train --study rescore` a ajouté le découpage avec / sans voisins aux runs de l'échelle).
 - **Contournement** : les essais Optuna ne gardent pas leurs prédictions.
 - **Impact** : `du` donne 8,7 Gio pour `data/` et 0,5 Gio pour `mlruns/`, soit ≈ 9,2 Gio, sous le plafond de 10 Go.
+
+### [2026-10-15] Recul « toutes paires » : la cible en µg/m³ en est la cause ; modèle retenu gardé
+- **Constat** : on part de l'échelon 3 (cible log, sans contrainte, avec la sonde locale) et on applique chaque changement seul, puis les trois ensemble. Volume complet, 5 plis, réglages par défaut (`python -m aircalib train --study attribution`).
+
+  | Variante | RMSE saines | % EPA saines | RMSE toutes | % EPA toutes | RMSE toutes, sans voisins | % EPA toutes, sans voisins |
+  |---|---|---|---|---|---|---|
+  | Échelon 3 | 3,95 | 76,7 | 4,30 | 72,5 | 6,18 | 38,3 |
+  | + cible µg/m³ | 3,92 | 78,0 | **4,46** | 73,6 | **6,67** | 36,4 |
+  | + contrainte monotone | 3,95 | 76,5 | 4,31 | 71,8 | 6,20 | 38,3 |
+  | − sonde locale | 3,97 | 76,5 | 4,33 | 72,1 | 6,23 | 38,9 |
+  | Les trois | 3,91 | 77,3 | 4,45 | 72,9 | 6,66 | 38,3 |
+
+  RMSE horaire en µg/m³, % de paires passant les cibles EPA en horaire. L'échelon 3 rejoue exactement le run de l'étape 6 (calcul déterministe).
+- **Pourquoi** : le recul vient de la **cible en µg/m³**. L'erreur quadratique en µg/m³ donne un poids énorme aux pics des capteurs abîmés et des heures sans voisins, alors que le log les écrase. La contrainte monotone ne change rien. Le retrait de la sonde locale coûte 0,02 µg/m³, ce qui reste dans le bruit ; sur le sous-échantillon, il faisait gagner 0,03.
+- **Contournement** : la règle de décision fixée au départ était : on annule un changement qui cause le recul sans rien apporter sur les paires saines. La cible en µg/m³ apporte quelque chose sur les saines : −0,03 µg/m³ et +1,3 point de % EPA horaire (−0,3 point en journalier). **Le modèle retenu est donc gardé.** Justification : le produit vise les capteurs sains ; les capteurs abîmés sont repérés par le score de santé. Limite de cette justification : le score ne repère qu'environ 56 % des capteurs abîmés (notebook 06). La sonde locale reste retirée pour l'argument produit (aucune sonde d'humidité requise), à un coût de 0,02 µg/m³.
+- **Impact** : la question est tranchée. Le modèle retenu est meilleur sur les capteurs sains et moins robuste sur les capteurs abîmés (+0,15 µg/m³ sur toutes paires). L'étape 7 continue de donner les deux chiffres.
+
+## Étape 7 — Évaluation finale : temps, distance, France
+
+### [2026-10-15] Test temporel : un an d'écart coûte 15 points de paires EPA ; il faut réapprendre chaque année
+- **Constat** : modèle retenu, paires saines (RMSE horaire en µg/m³ ; % de paires passant les cibles EPA, horaire / journalier) :
+
+  | Scénario | RMSE | % EPA |
+  |---|---|---|
+  | Référence (5 plis, deux années mélangées, heures 2025) | 3,91 | 82,4 / 86,9 |
+  | (b0) nouvelles stations, appris et testé sur 2025 | 3,83 | 84,3 / 88,9 |
+  | (b) nouvelles stations, 2024 → 2025 | **4,38** | **69,5 / 81,2** |
+  | (a) mêmes stations, 2024 → 2025 | 3,69 | 82,0 / **92,1** |
+
+  Pour (a), la référence sur les mêmes paires donne 3,93 et 82,7 / 87,1. Coût de l'année d'écart (b − b0) : +0,55 µg/m³ et −15 points en horaire. La pente tombe de 0,85 à 0,72. Mois par mois, le modèle de 2024 surestime les mois propres de 2025 (juin +1,45 µg/m³) et sous-estime les mois pollués (février −1,7), alors que le témoin garde un biais stable (+0,1 à +0,4). Par âge du capteur, le coût vaut +0,11 µg/m³ sous 1 an et +0,5 à +0,7 au-delà.
+- **Pourquoi** : la relation capteur → référence change d'une année à l'autre (épisodes, composition de l'aérosol). Avec une seule année, le modèle n'en voit qu'une partie et comprime les valeurs nouvelles. L'âge joue peut-être (encrassement de l'optique), mais l'effet n'est pas régulier : c'est une hypothèse. Le volume d'apprentissage n'est pas en cause : (b0), avec un an, fait aussi bien que la référence avec deux.
+- **Contournement** : aucun dans le modèle. Le témoin (b0) a les mêmes heures de test que (b) et un volume d'apprentissage comparable, ce qui isole le seul effet du temps. Le modèle physique ($a$, $\kappa$) est réajusté sur les seules lignes d'entraînement de chaque scénario (`models.data.fit_physics`).
+- **Impact** : **recommandation produit : réapprendre le modèle chaque année** avec les données validées des stations, ou avec plusieurs années d'historique. Un client qui garde ses stations gagne surtout en journalier (92 %) et sur les heures sans voisins (60 % contre 52 %).
+
+### [2026-10-15] Test distance : jusqu'à 3 km, la distance compte peu ; ce qui compte, ce sont les voisins
+- **Constat** : protocole du plan (stations du pli exclues de l'entraînement, toutes leurs paires prédites jusqu'à 3 km). Paires saines, % de paires passant les cibles EPA (horaire / journalier) :
+
+  | Distance | Corrigé | Brut |
+  |---|---|---|
+  | < 0,5 km | 81,7 / 88,3 | 27,0 / 36,9 |
+  | 0,5–1 km | 80,2 / 86,1 | 26,5 / 38,6 |
+  | 1–1,5 km | 78,0 / 82,8 | 22,0 / 40,8 |
+  | 1,5–2 km | 80,4 / 88,1 | 23,1 / 40,4 |
+  | 2–3 km | **70,1 / 80,1** | 22,6 / 35,5 |
+
+  Avec voisins, de 81 à 92 % des paires passent en horaire à toutes les distances (2–3 km : 81,2 / 91,3). Sans voisins, de 40 à 50 %. Les heures sans voisins font 15 % sous 0,5 km, 21 à 25 % entre 0,5 et 2 km, et 38 % au-delà de 2 km. Toutes paires : 83,2 % sous 0,5 km et 64,0 % à 2–3 km.
+- **Pourquoi** : le PM2.5 est un polluant surtout régional, donc l'air de fond est le même à quelques kilomètres, et la médiane des voisins ramène la correction au niveau local. Les capteurs loin des stations sont dans des zones moins denses, donc moins entourés de capteurs citoyens.
+- **Contournement** : aucun. Limites :
+  - l'« erreur » à distance mêle l'erreur du capteur et la différence réelle d'air entre les deux sites ;
+  - `distance_km` n'a été apprise que jusqu'à 1,5 km (au-delà, les arbres la traitent comme la plus grande valeur vue) ;
+  - rien n'a été mesuré au-delà de 3 km.
+- **Impact** : **réponse business : au moins 3 km, à condition d'avoir des voisins citoyens.**
+
+### [2026-10-15] Transfert vers la France : échec tel quel, surtout faute de voisins
+- **Constat** : modèle réentraîné sur toutes les paires saines allemandes ≤ 1,5 km, appliqué sans réajustement (physique comprise). Paires saines, % de paires passant les cibles EPA (horaire / journalier) :
+  - ensemble : **22,8 / 35,2** après correction, contre 15,8 / 24,2 brutes ; RMSE 7,88 → 5,47 µg/m³, $R^2$ 0,35 → 0,55 ;
+  - toutes paires : 18,4 / 28,5, contre 11,8 / 17,9 brutes (le même « avant » qu'au notebook 04) ;
+  - avec voisins : 50,0 / 52,9 ; sans voisins : 12,7 / 24,2 ;
+  - bande 1,5–3 km avec voisins : 62,1 % en horaire, $R^2$ 0,72 ;
+  - par méthode de la station : optique 46,7 %, TEOM 5,9 % (11,8 % brut), bêta 0 %.
+
+  Le niveau moyen est juste (prédiction 9,7 µg/m³ pour une référence de 9,4) ; c'est la pente qui manque (0,54).
+- **Pourquoi** : 61 % des heures françaises des paires saines n'ont pas de voisins (68 % ≤ 1,5 km), contre 21 % en Allemagne. Les références françaises sont plus souvent des TEOM et des jauges bêta, au temps de réponse différent, et la météo officielle vient d'un autre réseau.
+- **Contournement** : aucun réajustement, comme demandé.
+- **Impact** : le modèle ne se vend pas tel quel en France. Il faudrait une calibration locale (quelques stations françaises à l'entraînement) et un réseau plus dense. Avec voisins, l'écart à l'Allemagne se réduit nettement.
+
+### [2026-10-15] Découpages : les stations industrielles, le TEOM en horaire et le brouillard sont les points faibles
+- **Constat** : modèle retenu, Allemagne ≤ 1,5 km, paires saines, % de paires passant les cibles EPA (horaire / journalier) :
+  - type de station : trafic 82,4 / 88,6, fond 79,4 / 82,4, **industriel 0 / 33** (8 paires) ;
+  - méthode de mesure : optique 85,1 / 87,4, bêta 81,0 / 90,5, néphélométrie + bêta 57,4 / 70,0, TEOM 54,5 / 90,9 ;
+  - saison : hiver 80,2, printemps 75,8, automne 72,4, été 69,0 en horaire (RMSE estival 2,70 µg/m³ mais $R^2$ 0,60) ;
+  - humidité (horaire) : 70,8 sous 50 %, 80 à 82 entre 60 et 95 %, **69,4 au-delà de 95 %**.
+- **Pourquoi** :
+  - le TEOM répond avec une demi-heure de retard : cela pèse en horaire et disparaît en journalier ;
+  - en été, la référence varie peu, ce qui fait baisser mécaniquement le $R^2$, donc la pente ;
+  - au-delà de 95 %, l'humidité est plafonnée dans le modèle physique (brouillard) ;
+  - près des sites industriels, les sources sont locales et il n'y a presque pas de voisins.
+- **Contournement** : aucun. Une tranche (saison, humidité) a toujours un % EPA plus bas que l'ensemble, parce que la référence y varie moins.
+- **Impact** : à annoncer au client. Le produit tient sa promesse en trafic et en fond, pas près d'un site industriel.
+
+### [2026-10-15] Intervalle de prédiction : la calibration conforme ramène la couverture à 80 %
+- **Constat** : l'intervalle 10–90 % de la régression quantile couvrait 62,4 % (paires saines). Après calibration conforme, pli par pli, il couvre :
+  - **79,8 %** avec une seule calibration (77,7 à 82,2 % selon le pli), mais 75,4 % seulement sur les heures sans voisins ;
+  - 79,7 % avec voisins et 79,6 % sans, avec une calibration par voisinage.
+
+  La largeur médiane passe de 4,0 à 6,0 µg/m³ : 5,6 avec voisins et 7,8 sans dans la variante par voisinage.
+- **Pourquoi** : les quantiles appris ignorent le biais propre à une station nouvelle. Sans voisins, l'incertitude est plus grande.
+- **Contournement** : `evaluation/conformal.py`, testé (la couverture est restaurée sur des plis jamais utilisés pour la calibration ; un pli ne se calibre jamais lui-même). L'écart de chaque heure est mesuré en log, parce que l'erreur est multiplicative. Variante retenue : une calibration par voisinage. Limites :
+  - les écarts des 4 plis de calibration viennent de modèles qui avaient appris le 5ᵉ, donc l'échangeabilité n'est qu'approchée ;
+  - l'intervalle est celui du modèle quantile, pas du modèle retenu.
+- **Impact** : un intervalle annoncé « 80 % » tient sa promesse sur des stations jamais vues ; il est plus large quand le capteur est isolé.
+
+### [2026-10-15] Comparaison à la littérature : un R² comparable à Oslo, sous un protocole plus dur
+- **Constat** : Liu et al. (2019, *Atmosphere* 10(2), 41) ont testé trois SDS011 sur le site d'une station TEOM d'Oslo pendant 4 mois. Leur $R^2$ va de 0,55–0,71 avant correction à 0,76–0,80 après (chiffres du résumé de l'article). Nous obtenons 0,18 → 0,76 sur les paires saines, et 0,81 avec voisins, sur des stations jamais vues ; la France tombe à 0,55.
+- **Pourquoi** :
+  - notre $R^2$ est regroupé sur 459 paires et deux ans (les écarts de niveau entre sites y pèsent) ;
+  - le modèle n'a jamais vu ni le capteur testé ni sa station ;
+  - nous utilisons les capteurs voisins, une information que l'étude d'Oslo n'avait pas.
+- **Contournement** : la différence de protocole est écrite à côté des chiffres (notebook 07, section 6).
+- **Impact** : le résultat allemand est au niveau de la littérature, avec un protocole plus exigeant.
+
+### [2026-10-15] Disque : prédictions des runs d'attribution supprimées
+- **Constat** : avec les runs de l'étape 7, `mlruns/` atteignait 0,95 Gio, et le total ≈ 9,65 Gio, soit 10,4 Go.
+- **Pourquoi** : chaque run garde ses prédictions hors pli (≈ 46 Mo pour 5,5 M d'heures, 110 Mo pour le test distance).
+- **Contournement** : les 5 fichiers de prédictions des runs d'attribution ont été supprimés (232 Mo) ; leurs métriques et leurs tables restent dans MLflow. L'étude ne les enregistre plus. Les « capteurs bruts » de l'étape 7 n'enregistrent que leurs tables par tranche.
+- **Impact** : `data/` fait 8,7 Gio et `mlruns/` 0,7 Gio, soit ≈ 9,4 Gio.

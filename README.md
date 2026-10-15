@@ -8,11 +8,22 @@
 Clients visés : une collectivité qui veut un réseau de mesure dense à bas coût, un promoteur
 immobilier, un assureur santé.
 
-**Statut :** étape 6 (modèles) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
-[`01`](notebooks/01_sources_et_faisabilite.ipynb), [`02`](notebooks/02_ingestion_bronze.ipynb),
-[`03`](notebooks/03_nettoyage_silver.ipynb), [`04`](notebooks/04_exploration_paires.ipynb),
-[`05`](notebooks/05_features_gold.ipynb) et [`06`](notebooks/06_modeles.ipynb), et le rapport d'entonnoir
-[`reports/funnel.md`](reports/funnel.md). Ce README sera complété au fil des étapes.
+**Statut :** étape 7 (évaluation finale) — voir [`docs/PLAN.md`](docs/PLAN.md), les notebooks
+[`01`](notebooks/01_sources_et_faisabilite.ipynb) à [`07`](notebooks/07_evaluation_finale.ipynb) et le rapport
+d'entonnoir [`reports/funnel.md`](reports/funnel.md).
+
+## La réponse, en trois phrases
+
+**Oui : corrigé par un modèle appris sur d'autres stations, un capteur SDS011 en bon état passe les cibles de l'EPA
+dans 80 % des cas en horaire et 85 % en journalier (contre 25 % et 39 % sans correction), et cela tient jusqu'à 3 km
+d'une station (70 à 82 % selon la distance ; 81 à 92 % quand le capteur a au moins 3 voisins citoyens).** La vraie
+limite n'est pas la distance mais la densité du réseau citoyen et le temps : sans voisins, moins d'un capteur sur deux
+passe, et un modèle appris sur une année perd 15 points l'année suivante, il faut donc le réapprendre chaque année. Le
+modèle allemand ne se transpose pas tel quel en France (23 % des capteurs sains en horaire, 35 % en journalier), où
+61 % des heures n'ont pas de voisins : il y faut une calibration locale.
+
+Les preuves : notebook [`07`](notebooks/07_evaluation_finale.ipynb) et la section « Hors des conditions d'apprentissage »
+ci-dessous.
 
 ## Le point de départ : un capteur à 30 € sans correction
 
@@ -85,6 +96,35 @@ l'entraînement. Le tableau porte sur l'Allemagne, à ≤ 1,5 km, en 2024–2025
 - **Rejetés, avec chiffres** : modèle hybride (pas robuste aux capteurs abîmés), intervalle 10–90 % des quantiles (ne
   couvre que 62 %), sonde d'humidité du capteur (n'apporte rien). Détails : notebook 06 et journal.
 
+## Hors des conditions d'apprentissage : temps, distance, France
+
+% de paires saines passant les cibles EPA, horaire / journalier ; toujours sur des stations jamais vues à
+l'entraînement, sauf (a).
+
+| Test | Toutes heures | Avec voisins | Sans voisins |
+|---|---|---|---|
+| Référence (5 plis, Allemagne ≤ 1,5 km, 2024–2025) | 79,7 / 85,3 | 88,3 / 92,0 | 42,1 / 58,6 |
+| (b) nouvelles stations, appris en 2024, testé en 2025 | 69,5 / 81,2 | 79,0 / 89,0 | 38,9 / 52,3 |
+| (b0) témoin : nouvelles stations, appris et testé en 2025 | 84,3 / 88,9 | 92,0 / 93,2 | 55,8 / 69,8 |
+| (a) mêmes stations, appris en 2024, testé en 2025 | 82,0 / 92,1 | 89,2 / 96,3 | 60,0 / 75,3 |
+| Capteurs à < 0,5 km de la station | 81,7 / 88,3 | 87,4 / 90,9 | 50,0 / 66,7 |
+| Capteurs à 2–3 km de la station | 70,1 / 80,1 | 81,2 / 91,3 | 49,2 / 60,0 |
+| France, sans réajustement (brut : 15,8 / 24,2) | 22,8 / 35,2 | 50,0 / 52,9 | 12,7 / 24,2 |
+
+- **Temps** : à volume d'apprentissage égal, un an d'écart coûte 15 points en horaire (b contre b0). Le modèle de
+  2024 « comprime » les valeurs de 2025 : il surestime les mois propres et sous-estime les mois pollués. Il faut
+  **réapprendre chaque année**.
+- **Distance** : jusqu'à 3 km, elle compte peu. Le recul au-delà de 2 km vient surtout des heures sans voisins (38 %
+  contre 15 % sous 0,5 km). Le PM2.5 est un polluant largement régional.
+- **France** : le niveau moyen est juste, mais 61 % des heures n'ont pas de voisins, et les stations de référence
+  (TEOM, jauges bêta) répondent autrement. Il faut une calibration locale.
+- **Points faibles** : stations industrielles (0 % des 8 paires en horaire), TEOM en horaire (55 %, mais 91 % en
+  journalier), brouillard (69 % au-delà de 95 % d'humidité).
+- **Littérature** : $R^2$ 0,18 → 0,76 (0,81 avec voisins) sur des stations jamais vues, contre 0,55–0,71 → 0,76–0,80
+  pour trois SDS011 testés sur le site même de la station à Oslo (Liu et al., 2019).
+- **Intervalle** : la prédiction conforme ramène la couverture de l'intervalle 10–90 % de 62 % à 80 %, avec et sans
+  voisins (largeur médiane 5,6 et 7,8 µg/m³).
+
 ## Un exemple de rigueur : l'horloge des stations, vérifiée et pas supposée, sur toutes les paires
 
 Comparer un capteur à une station n'a de sens que si les deux parlent de **la même heure**. Les métadonnées
@@ -143,7 +183,8 @@ la médiane des capteurs citoyens à moins de 3 km, calculée **sans aucune donn
 défectueux repérés par la station avec une **AUC de 0,90** (au seuil 0,1 : précision 84 %, rappel 37 %). Un réseau
 de capteurs peut donc signaler lui-même ses capteurs suspects. Validé sur des stations jamais vues (notebook 06) :
 65 % des signalements sont justes et 56 % des capteurs abîmés sont repérés. Le transfert vers la France reste faible
-(précision 50 %, rappel 25 %, sur 50 paires). Détails : notebook 05, section 6, et notebook 06, section 11.
+(précision 50 %, rappel 25 %, sur 50 paires) : c'est une **preuve de concept**, pas encore une fonction du produit.
+Détails : notebook 05, section 6, et notebook 06, section 11.
 
 ## Données (100 % open data, coût 0 €)
 
@@ -175,6 +216,7 @@ make lint      # ruff
 make sample    # tout le pipeline sur 10 capteurs par pays et un mois (≈ 1 min)
 make data      # volume complet (≈ 3 h de téléchargement, 13 min de bronze, 4 min de silver et gold ; ≈ 9,1 Go)
 make train     # étape 6 : échelle de modèles, études annexes, modèle final (≈ 1 h 30, suivi MLflow)
+make evaluate  # étape 7 : tests temps, distance, France, découpages, intervalle conforme (≈ 30 min)
 make mlflow    # interface MLflow locale (sqlite:///mlflow.db)
 ```
 
@@ -185,8 +227,9 @@ suppression des bruts convertis), `silver` (étape 3 : un statut par mesure, agr
 accepte `--sample`. `features` (étape 5) construit la couche gold : les heures utilisables, 48 variables sans
 référence ni futur (test anti-fuite), les plis de validation croisée par station et le modèle physique ajusté hors
 pli. `train --study <étude>` (étape 6) entraîne et évalue un modèle ou une étude (`ladder`, `ablation`, `scale`,
-`monotone`, `unverifiable`, `x`, `optuna`, `recalibration`, `final`) et enregistre tout dans MLflow : paramètres,
-liste des variables, empreinte de la table gold, métriques par pli et prédictions hors pli.
+`monotone`, `unverifiable`, `x`, `optuna`, `recalibration`, `final`, `attribution` ; étape 7 : `temporal`,
+`distance`, `france`, `breakdowns`, `conformal`) et enregistre tout dans MLflow : paramètres, liste des variables,
+empreinte de la table gold, métriques par pli, tables par tranche et prédictions hors pli.
 
 Le nettoyage ne supprime aucune ligne : chaque mesure ou heure garde son statut (`ok` ou la première règle violée),
 et [`reports/funnel.md`](reports/funnel.md) compte ce que chaque règle retire. Uniquement des règles physiques et de

@@ -93,11 +93,15 @@ def features(sample: SampleOpt = False) -> None:
 @app.command()
 def train(
     study: Annotated[
-        str, typer.Option(help="ladder, ablation, scale, monotone, unverifiable, x, optuna, final")
+        str,
+        typer.Option(
+            help="step 6: ladder, ablation, scale, monotone, unverifiable, x, optuna, recalibration, final, "
+            "attribution, rescore; step 7: temporal, distance, france, breakdowns, conformal"
+        ),
     ],
     sample: SampleOpt = False,
 ) -> None:
-    """Step 6: train and cross-validate models by station, tracked in MLflow (``sqlite:///mlflow.db``)."""
+    """Steps 6-7: train and evaluate models by station, tracked in MLflow (``sqlite:///mlflow.db``)."""
     from aircalib.models.runtime import ensure_openmp  # noqa: PLC0415 - may re-launch the command (macOS)
 
     ensure_openmp()

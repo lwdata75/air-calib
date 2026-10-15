@@ -10,8 +10,8 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 | 3 | Nettoyage (silver) | ✅ terminé | `transform/{particles,runs,reference,weather,clock,funnel}.py`, `silver/{sources,pairs,rules,report}.py`, `schemas/silver.py`, `notebooks/03_nettoyage_silver.ipynb`, `reports/funnel.md`, `python -m aircalib silver` puis `pair` |
 | 4 | Exploration des heures-paires | ✅ terminé | `evaluation/metrics.py` (régression, cibles EPA, profils d'erreur), `notebooks/04_exploration_paires.ipynb` |
 | 5 | Feature engineering (couche gold) | ✅ terminé | `gold/build.py`, `transform/{physics,features,neighbours}.py`, `evaluation/{folds,metrics}.py`, `schemas/gold.py`, `notebooks/05_features_gold.ipynb`, `python -m aircalib features` |
-| 6 | Modélisation + MLflow | ✅ terminé — en attente de feu vert | `models/{data,ladder,cv,tracking,studies,results,runtime}.py`, `evaluation/{scoring,health}.py`, `notebooks/06_modeles.ipynb`, `python -m aircalib train --study <étude>`, `make train` |
-| 7 | Évaluation finale, transfert, conclusions | ⏳ à faire | test 2024 → 2025, transfert DE → FR, erreur selon la distance, notebook 07 |
+| 6 | Modélisation + MLflow | ✅ terminé | `models/{data,ladder,cv,tracking,studies,results,runtime}.py`, `evaluation/{scoring,health}.py`, `notebooks/06_modeles.ipynb`, `python -m aircalib train --study <étude>`, `make train` |
+| 7 | Évaluation finale, transfert, conclusions | ✅ terminé — en attente de feu vert | `models/generalisation.py`, `evaluation/conformal.py`, `notebooks/07_evaluation_finale.ipynb`, `make evaluate` |
 | 8 | Finition | ⏳ à faire | README final, `make sample` depuis un clone propre, requirements, lint/tests au vert |
 
 ## Décisions prises (feu vert du 14/10/2026)
@@ -57,7 +57,25 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 5. Score de santé : seuil choisi sur 4 plis et mesuré sur le 5ᵉ (précision 65 %, rappel 56 %) ; transfert vers la
    France faible (50 % / 25 %).
 
-## Engagements pour l'étape 7 (issus de l'étape 6)
+## Détail de l'étape 7 (fait)
+0. Vérification préalable (`attribution`) : le recul « toutes paires » vient de la cible en µg/m³, qui apporte sur les
+   paires saines ; le modèle retenu est gardé (règle fixée au feu vert, justification au journal).
+1. Test temporel : (a) mêmes stations 2024 → 2025, (b) nouvelles stations 2024 → 2025, (b0) témoin 2025 → 2025 ;
+   coût de l'année d'écart : −15 points de % EPA horaire ; croisement avec l'âge du capteur.
+2. Test distance par station (5 tranches jusqu'à 3 km) : 82 % → 70 % ; avec voisins, 81 à 92 % à toutes distances.
+3. Transfert France sans réajustement : 22,8 % / 35,2 % (paires saines), contre 15,8 % / 24,2 % brutes.
+4. Découpages : type de station, méthode, saison, humidité.
+5. Comparaison à Liu et al. (2019, Oslo).
+6. Bonus : intervalle conforme, couverture 62 % → 80 % (calibration par voisinage).
+7. Score de santé présenté comme preuve de concept.
+
+## Engagements pour l'étape 8 (finition)
+- README final (synthèse des choix et limites à partir du journal) ; `make sample` depuis un clone propre ; lint et
+  tests au vert ; `requirements.txt`.
+- Pistes non faites, à mentionner comme suites : calibration locale française, réapprentissage annuel, modèle dédié
+  aux heures sans voisins, réseau citoyen complet comme voisinage, intervalle conforme autour du modèle retenu.
+
+## Engagements pour l'étape 7 (issus de l'étape 6, tenus)
 - Test 2024 → 2025 (dérive) ; test « distance » par station (bandes ≤ 1,5 km et 1,5–3 km) ; transfert vers la France
   sans recalibrer. Ces trois tests sont **hors sélection** des hyperparamètres.
 - Garder le découpage « avec / sans voisins » dans **tous** les tableaux finaux, y compris le % de paires EPA.

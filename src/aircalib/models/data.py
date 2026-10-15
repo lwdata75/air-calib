@@ -24,6 +24,7 @@ from aircalib.config import Settings
 from aircalib.ingest.plan import NEAR
 from aircalib.schemas.gold import CATEGORICAL, FEATURES
 from aircalib.transform.features import log_floor
+from aircalib.transform.physics import fit_gain_kappa
 
 TARGET, LOG_TARGET = "reference", "log_reference"
 PHYSICS = ("kohler_c", "physics_pm25", "log_physics_pm25")
@@ -42,13 +43,31 @@ def file_hash(path: Path, chunk: int = 1 << 24) -> str:
     return digest.hexdigest()
 
 
-def load(settings: Settings) -> pl.DataFrame:
-    """Main-country, near-band pair-hours (the scope of step 6) with a ``has_neighbours`` flag."""
+def load(settings: Settings, rows: pl.Expr | None = None) -> pl.DataFrame:
+    """Pair-hours with a ``has_neighbours`` flag; by default the scope of step 6 (main country, near band).
+
+    Step 7 widens ``rows`` (far band, France); the training rows stay ``training_zone``.
+    """
+    if rows is None:
+        rows = (pl.col("country") == settings.study.main_country) & (pl.col("distance_band") == NEAR)
     return (
-        pl.read_parquet(gold_path(settings))
-        .filter(pl.col("country") == settings.study.main_country, pl.col("distance_band") == NEAR)
+        pl.scan_parquet(gold_path(settings))
+        .filter(rows)
         .with_columns(has_neighbours=pl.col("neighbour_median").is_not_null())
+        .collect()
     )
+
+
+def fit_physics(train: pl.DataFrame, settings: Settings) -> tuple[float, float]:
+    """``a, kappa`` fitted on the given training rows only (step 7: e.g. 2024 rows alone)."""
+    part = train.drop_nulls(["log_pm25", "log_reference", "official_humidity"])
+    fit = fit_gain_kappa(
+        part["log_pm25"].to_numpy(),
+        part["log_reference"].to_numpy(),
+        part["official_humidity"].to_numpy(),
+        settings.physics,
+    )
+    return fit.gain, fit.kappa
 
 
 def feature_list(drop_families: tuple[str, ...] = ()) -> list[str]:

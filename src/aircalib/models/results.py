@@ -56,3 +56,40 @@ def summary(table: pl.DataFrame, subset: str = "saines") -> pl.DataFrame:
 def artifact(settings: Settings, run_id: str, path: str) -> str:
     mlflow = _client(settings)
     return mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=path)
+
+
+def run_table(settings: Settings, parent: str, run: str, name: str, scope: str = "complet") -> pl.DataFrame:
+    """A CSV table logged by a run (``summary``, ``per_fold``, ``slices_<breakdown>``)."""
+    runs = children(settings, parent, scope)
+    run_id = runs.filter(pl.col("run") == run)["run_id"][0]
+    return pl.read_csv(artifact(settings, run_id, f"{name}.csv"))
+
+
+def compact(table: pl.DataFrame, keys: list[str] | None = None) -> pl.DataFrame:
+    """Hourly and daily rows of a summary / slice table side by side, rounded, one row per key.
+
+    Columns: hours, RMSE, R², slope, intercept, pairs scored and % of pairs passing the EPA
+    targets (hourly), then RMSE and % of pairs passing (daily).
+    """
+    keys = (keys or []) + ["paires", "voisins"]
+    hourly = table.filter(pl.col("résolution") == "hourly").select(
+        *keys,
+        heures=pl.col("n").cast(pl.Int64),
+        rmse_h=pl.col("rmse").round(2),
+        r2_h=pl.col("r2").round(2),
+        pente_h=pl.col("slope").round(2),
+        ordonnee_h=pl.col("intercept").round(2),
+        paires_notees=pl.col("pairs").cast(pl.Int64),
+        epa_h=pl.col("pct_epa_all").round(1),
+    )
+    daily = table.filter(pl.col("résolution") == "daily").select(
+        *keys, rmse_j=pl.col("rmse").round(2), epa_j=pl.col("pct_epa_all").round(1)
+    )
+    order = {"saines": 0, "toutes": 1}
+    nb = {"toutes": 0, "avec_voisins": 1, "sans_voisins": 2}
+    return (
+        hourly.join(daily, on=keys, how="left")
+        .with_columns(_p=pl.col("paires").replace_strict(order), _v=pl.col("voisins").replace_strict(nb))
+        .sort(*keys[:-2], "_p", "_v")
+        .drop("_p", "_v")
+    )

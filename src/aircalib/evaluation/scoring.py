@@ -47,18 +47,9 @@ def pair_pass_rate(frame: pl.DataFrame, cfg: Evaluation, min_n: int) -> dict[str
     }
 
 
-def score(oof: pl.DataFrame, cfg: Evaluation) -> tuple[dict[str, float], dict[str, pl.DataFrame]]:
-    """Flat metric dict (for MLflow) and readable tables.
-
-    ``oof`` needs ``pair_id, hour, fold, reference, prediction, sane_pair, has_neighbours``.
-    Every figure exists for sane pairs and all pairs, and for all hours, the hours *with*
-    citizen neighbours and the hours *without* (a pair's EPA targets are then computed on
-    its hours of that kind, if it has enough of them). Names:
-    ``<resolution>_<subset>[_<neighbours>]_<metric>``, e.g. ``hourly_saines_rmse``,
-    ``daily_toutes_sans_voisins_pct_epa_all``.
-    """
+def summary_rows(oof: pl.DataFrame, cfg: Evaluation) -> list[dict]:
+    """One row per resolution (hourly, daily) × pairs (sane, all) × hours (all, with, without neighbours)."""
     data = _as_sensor(oof)
-    flat: dict[str, float] = {}
     rows = []
     for subset, mask in SUBSETS.items():
         for neighbours, nb_mask in NEIGHBOURS.items():
@@ -70,27 +61,65 @@ def score(oof: pl.DataFrame, cfg: Evaluation) -> tuple[dict[str, float], dict[st
                 if frame.is_empty():
                     continue
                 pooled = overall(frame).row(0, named=True)
-                rates = pair_pass_rate(frame, cfg, min_n)
-                row = {
-                    "résolution": resolution,
-                    "paires": subset,
-                    "voisins": neighbours or "toutes",
-                    "n": float(pooled["n"]),
-                    **{m: pooled[m] for m in METRICS},
-                    **rates,
-                }
-                rows.append(row)
-                prefix = f"{resolution}_{subset}_{neighbours}_" if neighbours else f"{resolution}_{subset}_"
-                for key, value in row.items():
-                    if isinstance(value, float):
-                        flat[prefix + key] = value
+                rows.append(
+                    {
+                        "résolution": resolution,
+                        "paires": subset,
+                        "voisins": neighbours or "toutes",
+                        "n": float(pooled["n"]),
+                        **{m: pooled[m] for m in METRICS},
+                        **pair_pass_rate(frame, cfg, min_n),
+                    }
+                )
+    return rows
+
+
+def score(oof: pl.DataFrame, cfg: Evaluation) -> tuple[dict[str, float], dict[str, pl.DataFrame]]:
+    """Flat metric dict (for MLflow) and readable tables.
+
+    ``oof`` needs ``pair_id, hour, fold, reference, prediction, sane_pair, has_neighbours``.
+    Every figure exists for sane pairs and all pairs, and for all hours, the hours *with*
+    citizen neighbours and the hours *without* (a pair's EPA targets are then computed on
+    its hours of that kind, if it has enough of them). Names:
+    ``<resolution>_<subset>[_<neighbours>]_<metric>``, e.g. ``hourly_saines_rmse``,
+    ``daily_toutes_sans_voisins_pct_epa_all``.
+    """
+    flat: dict[str, float] = {}
+    rows = summary_rows(oof, cfg)
+    for row in rows:
+        nb = "" if row["voisins"] == "toutes" else row["voisins"]
+        prefix = (
+            f"{row['résolution']}_{row['paires']}_{nb}_" if nb else f"{row['résolution']}_{row['paires']}_"
+        )
+        for key, value in row.items():
+            if isinstance(value, float):
+                flat[prefix + key] = value
     tables = {"summary": pl.DataFrame(rows)}
+    data = _as_sensor(oof)
     per_fold = overall(data.filter(pl.col("sane_pair")), ["fold"])
     tables["per_fold"] = per_fold
     for rec in per_fold.iter_rows(named=True):
         for m in METRICS:
             flat[f"fold{rec['fold']}_hourly_saines_{m}"] = rec[m]
     return flat, tables
+
+
+def score_slices(oof: pl.DataFrame, by: pl.Expr, cfg: Evaluation, name: str = "tranche") -> pl.DataFrame:
+    """``summary_rows`` for each value of ``by`` (distance band, season, station type...).
+
+    A pair's EPA targets are computed on its hours of the slice (if it has at least
+    ``min_hours`` of them, or ``min_days`` complete days): the % of pairs passing is
+    therefore a property of the pair *in these conditions*.
+    """
+    data = oof.with_columns(by.alias(name))
+    tables = []
+    for value in data[name].drop_nulls().unique().sort().to_list():
+        rows = summary_rows(data.filter(pl.col(name) == value), cfg)
+        if rows:
+            tables.append(pl.DataFrame(rows).with_columns(pl.lit(value).alias(name)))
+    if not tables:
+        return pl.DataFrame()
+    return pl.concat(tables, how="diagonal_relaxed").select(name, pl.exclude(name))
 
 
 def interval_coverage(oof: pl.DataFrame, lower: str, upper: str) -> dict[str, float]:

@@ -306,6 +306,21 @@ cv:
   # Station-wise folds (GroupKFold): a station and ALL its pairs (both bands) are in one fold.
   n_folds: 5
 
+generalisation:
+  # Step 7, time test: train on one year, test on the next (same stations, then new stations).
+  train_year: 2024
+  test_year: 2025
+  # Breakdowns: sensor-station distance (km; the near band ends at 1.5, downloads at 3), sensor age (years).
+  distance_bins_km: [0.5, 1.0, 1.5, 2.0]
+  age_bins_years: [1, 2, 3, 5]
+  seasons:            # meteorological seasons, by month
+    hiver: [12, 1, 2]
+    printemps: [3, 4, 5]
+    ete: [6, 7, 8]
+    automne: [9, 10, 11]
+  # Split conformal calibration of the 10-90 % quantile interval (nominal coverage from models.quantiles).
+  conformal_by_neighbours: true   # one widening for hours with neighbours, one for hours without
+
 health:
   # Sensor health from citizen neighbours only (no reference): hourly changes of ln PM vs the neighbours'
   # median, over hours with enough neighbours.

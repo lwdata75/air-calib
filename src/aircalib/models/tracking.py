@@ -22,7 +22,7 @@ from aircalib.config import Settings
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 import mlflow
 
-from aircalib.evaluation.scoring import interval_coverage, score
+from aircalib.evaluation.scoring import interval_coverage, score, score_slices
 from aircalib.models.cv import CrossValidation
 
 
@@ -47,9 +47,17 @@ def log_cv(
     gold_hash: str,
     extra_params: dict | None = None,
     keep_predictions: bool = True,
+    slices: dict[str, pl.Expr] | None = None,
 ) -> dict[str, float]:
-    """Log one cross-validation in the active run; returns the flat metrics."""
+    """Log one cross-validation in the active run; returns the flat metrics.
+
+    ``slices`` adds one table per breakdown (``slices_<name>.csv``: every summary row per
+    value of the expression), so that a run logged without its predictions can still be
+    read by distance band, station type...
+    """
     flat, tables = score(result.oof, settings.evaluation)
+    for name, expr in (slices or {}).items():
+        tables[f"slices_{name}"] = score_slices(result.oof, expr, settings.evaluation, name)
     if "q10" in result.oof.columns and "q90" in result.oof.columns:
         for subset, mask in (("saines", pl.col("sane_pair")), ("toutes", pl.lit(True))):
             cov = interval_coverage(result.oof.filter(mask), "q10", "q90")

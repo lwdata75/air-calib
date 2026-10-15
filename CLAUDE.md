@@ -94,5 +94,10 @@ Silver : `silver/sensor_community/{pm/<id>.parquet, pm_hourly, segments, humidit
   monotone, réglages Optuna (essai 14 sur 15) ; RMSE 3,84, 79,7 % / 85,3 % de paires EPA (saines) ; sans voisins
   (21 % des heures) RMSE 5,21 et 42 % : limite principale. Optuna ≈ 2 % ; voisinage ≈ 21 %. Pente EPA ≈ R².
 
+- Étape 7 (`models/generalisation.py`, `make evaluate`) : 2024 → 2025 sur nouvelles stations −15 points de % EPA (le
+  témoin 2025 → 2025 fait 84 %) : réapprendre chaque année ; distance : 82 % (< 0,5 km) → 70 % (2–3 km), effet porté
+  par la part d'heures sans voisins ; France sans réajustement 23 % / 35 % (61 % d'heures sans voisins) ; intervalle
+  conforme par voisinage 62 % → 80 %. Recul « toutes paires » causé par la cible µg/m³ (gardée, règle du feu vert).
+
 ## Convention horaire du projet
 Une heure est étiquetée par son **début en UTC** : `13:00` = `[13:00, 14:00[` UTC.

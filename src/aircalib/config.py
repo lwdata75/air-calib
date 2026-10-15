@@ -274,6 +274,15 @@ class CrossValidation(BaseModel):
     n_folds: int
 
 
+class Generalisation(BaseModel):
+    train_year: int
+    test_year: int
+    distance_bins_km: list[float]
+    age_bins_years: list[float]
+    seasons: dict[str, list[int]]
+    conformal_by_neighbours: bool
+
+
 class Health(BaseModel):
     min_hours: int
     change_corr_min: float
@@ -313,6 +322,7 @@ class Settings(BaseSettings):
     physics: Physics
     features: Features
     cv: CrossValidation
+    generalisation: Generalisation
     health: Health
     sample: Sample
 

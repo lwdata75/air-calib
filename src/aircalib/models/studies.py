@@ -7,7 +7,10 @@
   or without the unverifiable pairs), ``x`` (dead-month threshold 0.1 / 0.3 / 0.5),
   ``optuna`` (hyper-parameters, nested runs), ``recalibration`` (linear recalibration of
   the predictions, learned out of fold, against the EPA slope);
-* ``final``: the retained configuration retrained on the full volume.
+* ``final``: the retained configuration retrained on the full volume;
+* ``attribution``: full volume, default parameters: rung 3 then each change of the
+  retained configuration alone (ug/m3 target, monotone constraint, no local probe), then
+  all three, to attribute the loss on the unverifiable pairs.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from aircalib.config import Settings
 from aircalib.logging import get_logger
 from aircalib.models import data as mdata
 from aircalib.models import tracking
-from aircalib.models.cv import cross_validate
+from aircalib.models.cv import CrossValidation, Split, fold_splits, run_splits
 from aircalib.models.ladder import Boosting, LogLinear, Physics, RawSensor, Recalibrated
 
 log = get_logger(__name__)
@@ -35,9 +38,9 @@ NEIGHBOURS = "voisinage citoyen"
 class Context:
     """Data shared by the studies (loaded once)."""
 
-    def __init__(self, settings: Settings, subsample: bool) -> None:
+    def __init__(self, settings: Settings, subsample: bool, rows: pl.Expr | None = None) -> None:
         self.settings = settings
-        self.full = mdata.load(settings)
+        self.full = mdata.load(settings, rows)
         self.categories = mdata.categories(self.full)
         self.fits = pl.read_parquet(settings.paths.gold / "physics_fits.parquet")
         self.gold_hash = mdata.file_hash(mdata.gold_path(settings))
@@ -62,14 +65,41 @@ class Context:
         features: list[str] | None = None,
         train_mask=TRAIN,
         data: pl.DataFrame | None = None,
+        splits: list[Split] | None = None,
         nested: bool = False,
         extra: dict | None = None,
         keep_predictions: bool = True,
+        slices: dict[str, pl.Expr] | None = None,
     ) -> dict[str, float]:
+        """Train and predict (the 5 station folds unless ``splits`` is given), then log the run."""
         start = time.perf_counter()
-        result = cross_validate(
-            make_model, self.data if data is None else data, self.fits, self.settings, train_mask=train_mask
+        splits = splits or fold_splits(self.fits, self.settings, train_mask=train_mask)
+        result = run_splits(make_model, self.data if data is None else data, splits, self.settings)
+        return self.log(
+            name,
+            result,
+            features=features,
+            nested=nested,
+            extra=extra,
+            keep_predictions=keep_predictions,
+            slices=slices,
+            start=start,
         )
+
+    def log(
+        self,
+        name: str,
+        result: CrossValidation,
+        *,
+        features: list[str] | None = None,
+        nested: bool = True,
+        extra: dict | None = None,
+        keep_predictions: bool = True,
+        slices: dict[str, pl.Expr] | None = None,
+        start: float | None = None,
+    ) -> dict[str, float]:
+        """Log predictions (computed here or read back from another run) as one MLflow run."""
+        start = time.perf_counter() if start is None else start
         with tracking.run(name, nested=nested, tags={"scope": self.scope}):
             flat = tracking.log_cv(
                 result,
@@ -78,6 +108,7 @@ class Context:
                 gold_hash=self.gold_hash,
                 extra_params={"scope": self.scope, **(extra or {})},
                 keep_predictions=keep_predictions,
+                slices=slices,
             )
         log.info(
             "%s: hourly sane RMSE %.2f, EPA hourly %.1f %%, daily %.1f %% (%.0f s)",
@@ -226,35 +257,64 @@ def recalibration(ctx: Context) -> None:
         )
 
 
-def final(ctx: Context) -> None:
-    """The retained configuration (``models.final``), full volume, with default and with Optuna's parameters.
-
-    Both variants share everything but the hyper-parameters: the difference measures what tuning brings.
-    """
+def retained(ctx: Context, *, tuned: bool = True, name: str = "modele_retenu") -> tuple[Callable, list[str]]:
+    """The retained model (``models.final``): factory and features; ``tuned`` uses Optuna's parameters."""
     cfg = ctx.settings.models.final
-    tuned = json.loads(best_params_path(ctx.settings).read_text(encoding="utf-8"))
-    tuned_rounds = tuned.pop("num_boost_round")
-    for key in ("best_rmse", "trial"):
-        tuned.pop(key, None)
     features = mdata.feature_list(drop_families=tuple(cfg.drop_families))
     common = {
         "log_target": cfg.log_target,
         "residual_of": cfg.residual_of or None,
         "monotone": tuple(ctx.settings.models.monotone_features) if cfg.monotone else (),
     }
-    variants = [("final_reglages_defaut", {}, ctx.settings.models.num_boost_round)]
+    params, rounds = {}, ctx.settings.models.num_boost_round
+    if tuned and cfg.use_optuna:
+        params = json.loads(best_params_path(ctx.settings).read_text(encoding="utf-8"))
+        rounds = params.pop("num_boost_round")
+        for key in ("best_rmse", "trial"):
+            params.pop(key, None)
+    model = ctx.boosting(features, lgb_params=params, num_boost_round=rounds, name=name, **common)
+    factory = (lambda m=model: Recalibrated(m)) if cfg.recalibrate else model
+    return factory, features
+
+
+def final(ctx: Context) -> None:
+    """The retained configuration (``models.final``), full volume, with default and with Optuna's parameters.
+
+    Both variants share everything but the hyper-parameters: the difference measures what tuning brings.
+    """
+    cfg = ctx.settings.models.final
+    variants = [("final_reglages_defaut", False)]
     if cfg.use_optuna:
-        variants.append(("final_reglages_optuna", tuned, tuned_rounds))
+        variants.append(("final_reglages_optuna", True))
     with tracking.run("modele_final", tags={"scope": ctx.scope}):
-        for name, params, rounds in variants:
-            model = ctx.boosting(features, lgb_params=params, num_boost_round=rounds, name=name, **common)
-            factory = (lambda m=model: Recalibrated(m)) if cfg.recalibrate else model
+        for name, tuned in variants:
+            factory, features = retained(ctx, tuned=tuned, name=name)
             ctx.evaluate(
                 name,
                 factory,
                 features=features,
                 nested=True,
                 extra={"final_" + k: str(v) for k, v in cfg.model_dump().items()},
+            )
+
+
+def attribution(ctx: Context) -> None:
+    """Rung 3 plus each change of ``models.final`` alone, then together (default parameters, full volume)."""
+    cfg = ctx.settings.models.final
+    mono = tuple(ctx.settings.models.monotone_features)
+    full = mdata.feature_list()
+    reduced = mdata.feature_list(drop_families=tuple(cfg.drop_families))
+    variants = [
+        ("echelon_3", full, {}),
+        ("cible_ugm3", full, {"log_target": False}),
+        ("contrainte_monotone", full, {"monotone": mono}),
+        ("sans_sonde_locale", reduced, {}),
+        ("trois_changements", reduced, {"log_target": False, "monotone": mono}),
+    ]
+    with tracking.run("attribution_recul", tags={"scope": ctx.scope}):
+        for name, features, kwargs in variants:
+            ctx.evaluate(
+                name, ctx.boosting(features, **kwargs), features=features, nested=True, keep_predictions=False
             )
 
 
@@ -277,8 +337,9 @@ STUDIES: dict[str, Callable[[Context], object]] = {
     "recalibration": recalibration,
     "final": final,
     "rescore": rescore,
+    "attribution": attribution,
 }
-FULL_VOLUME = {"ladder", "final", "rescore"}
+FULL_VOLUME = {"ladder", "final", "rescore", "attribution"}
 
 
 def best_params_path(settings: Settings) -> Path:
@@ -286,8 +347,14 @@ def best_params_path(settings: Settings) -> Path:
 
 
 def run(settings: Settings, study: str) -> None:
+    from aircalib.models import generalisation  # noqa: PLC0415 - step 7 builds on this module
+
+    studies = {**STUDIES, **generalisation.STUDIES}
+    if study not in studies:
+        raise ValueError(f"unknown study {study!r}; choose among {', '.join(studies)}")
     tracking.setup(settings)
-    ctx = Context(settings, subsample=study not in FULL_VOLUME)
+    rows = generalisation.ROWS[study](settings) if study in generalisation.ROWS else None
+    ctx = Context(settings, subsample=study not in FULL_VOLUME | set(generalisation.STUDIES), rows=rows)
     log.info(
         "study %s on %s: %d hours, %d pairs",
         study,
@@ -295,4 +362,4 @@ def run(settings: Settings, study: str) -> None:
         ctx.data.height,
         ctx.data["pair_id"].n_unique(),
     )
-    STUDIES[study](ctx)
+    studies[study](ctx)

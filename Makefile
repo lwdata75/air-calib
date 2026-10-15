@@ -1,4 +1,4 @@
-.PHONY: help setup requirements data sample train test lint format notebooks mlflow clean
+.PHONY: help setup requirements data sample train evaluate test lint format notebooks mlflow clean
 
 RUN := uv run
 
@@ -18,7 +18,12 @@ sample:  ## Fast end-to-end run on a small subset
 	$(RUN) python -m aircalib all --sample
 
 train:  ## Step 6: model ladder, side studies on the subsample, final model (MLflow, about 1 h 30)
-	for study in ladder ablation scale monotone unverifiable x optuna recalibration final; do \
+	for study in ladder ablation scale monotone unverifiable x optuna recalibration final attribution; do \
+		$(RUN) python -m aircalib train --study $$study || exit 1; \
+	done
+
+evaluate:  ## Step 7: time, distance, France, breakdowns, conformal interval (needs `make train`, about 30 min)
+	for study in temporal distance france breakdowns conformal; do \
 		$(RUN) python -m aircalib train --study $$study || exit 1; \
 	done
 
