@@ -39,6 +39,7 @@ class Context:
     """Data shared by the studies (loaded once)."""
 
     def __init__(self, settings: Settings, subsample: bool, rows: pl.Expr | None = None) -> None:
+        """Load the rows of the study (all of them, or the fixed subsample of pairs) once."""
         self.settings = settings
         self.full = mdata.load(settings, rows)
         self.categories = mdata.categories(self.full)
@@ -51,6 +52,7 @@ class Context:
         self.scope = "sous-échantillon" if subsample else "complet"
 
     def boosting(self, features: list[str] | None = None, **kwargs) -> Callable[[], Boosting]:
+        """A LightGBM factory with the configured parameters, overridable per study."""
         m = self.settings.models
         params = {**m.lightgbm, **kwargs.pop("lgb_params", {})}
         rounds = kwargs.pop("num_boost_round", m.num_boost_round)
@@ -60,10 +62,10 @@ class Context:
     def evaluate(
         self,
         name: str,
-        make_model,
+        make_model: Callable[[], object],
         *,
         features: list[str] | None = None,
-        train_mask=TRAIN,
+        train_mask: pl.Expr = TRAIN,
         data: pl.DataFrame | None = None,
         splits: list[Split] | None = None,
         nested: bool = False,
@@ -123,6 +125,7 @@ class Context:
 
 # ------------------------------------------------------------------------------- full volume
 def ladder(ctx: Context) -> None:
+    """The model ladder on the 5 station folds (rungs 0 to 5)."""
     m = ctx.settings.models
     features = mdata.feature_list()
     rungs = [
@@ -140,6 +143,7 @@ def ladder(ctx: Context) -> None:
 
 # ------------------------------------------------------------------------------- side studies
 def ablation(ctx: Context) -> None:
+    """Each feature family removed in turn, including the citizen neighbours."""
     from aircalib.schemas.gold import FEATURES  # noqa: PLC0415
 
     with tracking.run("ablation", tags={"scope": ctx.scope}):
@@ -157,12 +161,14 @@ def ablation(ctx: Context) -> None:
 
 
 def scale(ctx: Context) -> None:
+    """The same LightGBM with a ln target (Duan back-transform) and a ug/m3 target."""
     with tracking.run("echelle_log_vs_lineaire", tags={"scope": ctx.scope}):
         ctx.evaluate("cible_log", ctx.boosting(log_target=True), features=mdata.feature_list(), nested=True)
         ctx.evaluate("cible_ugm3", ctx.boosting(log_target=False), features=mdata.feature_list(), nested=True)
 
 
 def monotone(ctx: Context) -> None:
+    """LightGBM with and without the monotone constraint on the raw PM."""
     mono = tuple(ctx.settings.models.monotone_features)
     with tracking.run("contrainte_monotone", tags={"scope": ctx.scope}):
         ctx.evaluate("sans_contrainte", ctx.boosting(), features=mdata.feature_list(), nested=True)
@@ -176,6 +182,7 @@ def monotone(ctx: Context) -> None:
 
 
 def unverifiable(ctx: Context) -> None:
+    """Training on sane pairs only, then on every pair; evaluated on the same test pairs."""
     with_them = pl.col("country") == ctx.settings.study.main_country  # near band already
     with tracking.run("paires_inverifiables", tags={"scope": ctx.scope}):
         ctx.evaluate("entrainement_paires_saines", ctx.boosting(), features=mdata.feature_list(), nested=True)
@@ -189,6 +196,7 @@ def unverifiable(ctx: Context) -> None:
 
 
 def x_threshold(ctx: Context) -> None:
+    """Local humidity recomputed with X = 0.1, 0.3 and 0.5 (dead-month threshold), model retrained."""
     from aircalib.models.variants import local_humidity_for  # noqa: PLC0415
 
     with tracking.run("sensibilite_X", tags={"scope": ctx.scope}):
@@ -211,12 +219,14 @@ def x_threshold(ctx: Context) -> None:
 
 
 def optuna_search(ctx: Context) -> dict:
+    """TPE search of LightGBM's hyper-parameters (nested runs); the best ones are written to disk."""
     import optuna  # noqa: PLC0415
 
     m = ctx.settings.models
     features = mdata.feature_list()
 
     def objective(trial: optuna.Trial) -> float:
+        """One trial: a full cross-validation; returns the hourly RMSE of the sane pairs."""
         params = {}
         for name, r in m.optuna_space.items():
             if r.integer:
@@ -249,6 +259,7 @@ def optuna_search(ctx: Context) -> dict:
 
 
 def recalibration(ctx: Context) -> None:
+    """Plain LightGBM against the out-of-fold linear recalibration of its predictions."""
     base = ctx.boosting()
     with tracking.run("recalibration", tags={"scope": ctx.scope}):
         ctx.evaluate("sans_recalibration", base, features=mdata.feature_list(), nested=True)
@@ -343,10 +354,12 @@ FULL_VOLUME = {"ladder", "final", "rescore", "attribution"}
 
 
 def best_params_path(settings: Settings) -> Path:
+    """Where Optuna's best parameters are stored."""
     return settings.paths.gold.parent / "models" / "optuna_best.json"
 
 
 def run(settings: Settings, study: str) -> None:
+    """Run one study of steps 6-7 by name (``python -m aircalib train --study <name>``)."""
     from aircalib.models import generalisation  # noqa: PLC0415 - step 7 builds on this module
 
     studies = {**STUDIES, **generalisation.STUDIES}

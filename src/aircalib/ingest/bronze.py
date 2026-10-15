@@ -95,6 +95,7 @@ def convert_unit(settings: Settings, unit: dict) -> dict:
 
 
 def bronze_sensor_community(settings: Settings, plan: Plan) -> int:
+    """Convert every downloaded Sensor.Community unit to bronze Parquet; returns the number of failures."""
     raw_manifest, bronze_manifest = sc_manifests(settings)
     downloaded = raw_manifest.frame()
     if downloaded.is_empty():
@@ -123,6 +124,7 @@ def bronze_sensor_community(settings: Settings, plan: Plan) -> int:
 
 # --------------------------------------------------------------------------- EEA
 def bronze_eea(settings: Settings) -> int:
+    """Convert the EEA files of the planned sampling points to bronze; returns the number of failures."""
     points = pl.read_parquet(reference_dir(settings) / "eea_sampling_points.parquet")
     manifest = Manifest(settings.paths.bronze / "eea" / "_manifest.jsonl", ("pollutant", "sampling_point"))
     done, failures = manifest.done(), 0
@@ -170,6 +172,7 @@ def purge_raw_eea(settings: Settings) -> int:
 
 # --------------------------------------------------------------------------- DWD
 def bronze_dwd(settings: Settings) -> int:
+    """Convert the DWD zip files of the planned weather stations to bronze; returns the number of failures."""
     ref = reference_dir(settings) / "weather_stations_dwd.parquet"
     if not ref.exists():
         return 0

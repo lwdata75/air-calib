@@ -35,6 +35,7 @@ class PmReadings(pa.DataFrameModel):
 
     @pa.dataframe_check
     def ok_readings_are_physical(cls, data: pa.PolarsData) -> pl.LazyFrame:
+        """Every reading flagged ``ok`` is physical: 0 <= PM2.5 <= PM10 <= the sensor's range."""
         ok = pl.col("quality_flag") == OK
         return data.lazyframe.select(
             (~ok | ((pl.col("P2") >= 0) & (pl.col("P2") <= pl.col("P1")) & (pl.col("P1") <= PM_MAX))).alias(
@@ -48,6 +49,8 @@ class PmReadings(pa.DataFrameModel):
 
 
 class PmHourly(pa.DataFrameModel):
+    """Contract of the hourly particle table: one row per sensor, segment and hour."""
+
     sensor_id: pl.Int64 = pa.Field(nullable=False)
     segment: pl.UInt32 = pa.Field(nullable=False)
     hour: pl.Datetime = pa.Field(nullable=False)
@@ -117,6 +120,8 @@ class EeaHourly(pa.DataFrameModel):
 
 
 class WeatherHourly(pa.DataFrameModel):
+    """Contract of the hourly official weather table."""
+
     source: pl.String = pa.Field(nullable=False, isin=[weather.DWD, weather.METEO_FRANCE])
     station_id: pl.Int64 = pa.Field(nullable=False)
     hour: pl.Datetime = pa.Field(nullable=False)

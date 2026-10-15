@@ -66,6 +66,8 @@ class Eea(pa.DataFrameModel):
 
 
 class Dwd(pa.DataFrameModel):
+    """Contract of a DWD station table in bronze."""
+
     station_id: pl.Int64 = pa.Field(nullable=False)
     time_utc: pl.Datetime = pa.Field(nullable=False)
     quality_level: pl.Int64 = pa.Field(nullable=True)
@@ -78,6 +80,8 @@ class Dwd(pa.DataFrameModel):
 
 
 class MeteoFrance(pa.DataFrameModel):
+    """Contract of a Météo-France station table in bronze."""
+
     station_id: pl.Int64 = pa.Field(nullable=False)
     name: pl.String = pa.Field(nullable=True)
     lat: pl.Float64 = pa.Field(nullable=False)

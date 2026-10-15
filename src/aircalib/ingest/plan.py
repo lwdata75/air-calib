@@ -24,6 +24,7 @@ NEAR, FAR = "near", "far"
 
 
 def reference_dir(settings: Settings) -> Path:
+    """Folder of the plan's reference tables (created if needed)."""
     path = settings.paths.bronze / "reference"
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -57,6 +58,7 @@ def humidity_companions(inventory: pl.DataFrame, pairs: pl.DataFrame) -> pl.Data
 
 
 def _add_months(day: date, months: int) -> date:
+    """First day of the month ``months`` after (or before) ``day``'s month."""
     index = day.year * 12 + day.month - 1 + months
     return date(index // 12, index % 12 + 1, 1)
 
@@ -127,6 +129,8 @@ def sample_pairs(pairs: pl.DataFrame, n_per_country: int, month: date) -> pl.Dat
 # ---------------------------------------------------------------------- the plan
 @dataclass(frozen=True)
 class Plan:
+    """The download plan: pairs, humidity probes on the same sites, sensor-months to fetch."""
+
     pairs: pl.DataFrame  # one row per paired PM sensor
     humidity: pl.DataFrame  # humidity probes on the same sites
     units: pl.DataFrame  # sensor-months to download (PM + humidity)
@@ -177,6 +181,7 @@ def build_plan(settings: Settings) -> Plan:
 
 
 def load_plan(settings: Settings) -> Plan:
+    """Read the plan written by ``build_plan``."""
     out = reference_dir(settings)
     return Plan(
         pairs=pl.read_parquet(out / "pairs.parquet"),

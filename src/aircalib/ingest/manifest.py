@@ -29,10 +29,12 @@ class Manifest:
     """JSON-lines log of finished work units, identified by ``key`` fields."""
 
     def __init__(self, path: Path, key: Sequence[str]) -> None:
+        """A JSON-lines manifest at ``path`` whose records are identified by the ``key`` fields."""
         self.path = path
         self.key = tuple(key)
 
     def append(self, record: dict[str, Any]) -> None:
+        """Append one record (it must carry every key field)."""
         missing = [k for k in self.key if k not in record]
         if missing:
             raise KeyError(f"manifest record lacks key field(s) {missing}")
@@ -57,4 +59,5 @@ class Manifest:
         return {tuple(str(v) for v in row) for row in ok.iter_rows()}
 
     def key_of(self, record: dict[str, Any]) -> tuple:
+        """The identity of a record: its key fields as strings."""
         return tuple(str(record[k]) for k in self.key)

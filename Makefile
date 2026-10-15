@@ -9,7 +9,7 @@ setup:  ## Create the virtualenv from the lockfile
 	uv sync --frozen
 
 requirements:  ## Regenerate requirements.txt from uv.lock (never edit it by hand)
-	uv export --frozen --no-hashes --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+	uv export --frozen --no-hashes --no-dev --format requirements-txt -o requirements.txt
 
 data:  ## Run every implemented pipeline stage on the full period
 	$(RUN) python -m aircalib all

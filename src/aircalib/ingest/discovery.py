@@ -37,12 +37,14 @@ log = get_logger(__name__)
 
 # --------------------------------------------------------------------------- paths
 def _meta(settings: Settings) -> Path:
+    """The ``data/meta`` folder (created if needed)."""
     path = settings.paths.meta
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def eea_raw_path(settings: Settings, pollutant: str, country: str, sampling_point: str) -> Path:
+    """Where the raw EEA file of a sampling point is stored."""
     return eea.raw_path(settings.paths.raw, pollutant, country, sampling_point)
 
 
@@ -62,6 +64,7 @@ def sample_days(start: date, end: date, day_of_month: int) -> list[date]:
 async def _listing(
     client: PoliteClient, settings: Settings, day: date, today: date, cache: Path
 ) -> pl.DataFrame:
+    """File list of one archive day, read from the cache when present."""
     path = cache / f"{day.isoformat()}.parquet"
     if path.exists():
         return pl.read_parquet(path)
@@ -88,6 +91,7 @@ async def collect_listings(settings: Settings, today: date, days: list[date] | N
             task = progress.add_task("archive listings", total=len(days))
 
             async def one(day: date) -> pl.DataFrame:
+                """List one archive day (bounded concurrency, cached)."""
                 async with gate:
                     frame = await _listing(client, settings, day, today, cache)
                 progress.advance(task)
@@ -239,6 +243,7 @@ async def resolve_positions(settings: Settings, candidates: pl.DataFrame, today:
                 task = progress.add_task("file heads", total=todo.height)
 
                 async def one(rec: dict) -> None:
+                    """Read the first bytes of one sensor file to get its site and coordinates."""
                     url = sc.day_url(cfg.archive_url, rec["date"], today) + rec["filename"]
                     try:
                         head = await sc.fetch_head(client, url, cfg.head_bytes)
@@ -352,6 +357,7 @@ async def download_station_files(
             task = progress.add_task(f"EEA {pollutant} files", total=stations.height)
 
             async def one(rec: dict) -> dict:
+                """Download one EEA file and summarise its valid hours per month."""
                 dest = eea_raw_path(settings, pollutant, rec["country"], rec["sampling_point"])
                 await eea.download_parquet(client, rec["url"], dest)
                 progress.advance(task)
@@ -467,6 +473,7 @@ async def sensor_days(
 async def _download_days(
     settings: Settings, sensor: dict, start: date, n_days: int, today: date
 ) -> list[tuple[str, bytes]]:
+    """Download ``n_days`` daily files of one sensor (for the size probe)."""
     cfg = settings.sensor_community
     days = [date.fromordinal(start.toordinal() + i) for i in range(n_days)]
     urls = [
@@ -515,6 +522,7 @@ async def size_probe(
 
 
 def _parquet_size(frame: pl.DataFrame) -> int:
+    """Size in bytes of a frame written as zstd Parquet."""
     buffer = io.BytesIO()
     frame.write_parquet(buffer, compression="zstd")
     return buffer.tell()

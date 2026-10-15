@@ -24,6 +24,8 @@ DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "default.yaml"
 
 
 class Paths(BaseModel):
+    """Folders: data root, reports, and the sample sub-folder used by ``--sample``."""
+
     data_dir: Path
     reports_dir: Path
     sample_subdir: str
@@ -52,14 +54,17 @@ class Paths(BaseModel):
 
     @property
     def bronze(self) -> Path:
+        """Bronze layer: source content unchanged, typed Parquet."""
         return self.layers / "bronze"
 
     @property
     def silver(self) -> Path:
+        """Silver layer: cleaned hourly tables with a status per row."""
         return self.layers / "silver"
 
     @property
     def gold(self) -> Path:
+        """Gold layer: usable pair-hours with the model features."""
         return self.layers / "gold"
 
     @property
@@ -69,22 +74,29 @@ class Paths(BaseModel):
 
 
 class Period(BaseModel):
+    """``period`` section: first and last day of the study."""
+
     start: date
     end: date
 
     @model_validator(mode="after")
     def _ordered(self) -> Period:
+        """Reject a period that ends before it starts."""
         if self.end < self.start:
             raise ValueError(f"period.end ({self.end}) is before period.start ({self.start})")
         return self
 
 
 class Study(BaseModel):
+    """``study`` section: training country and transfer-test country."""
+
     main_country: str
     transfer_country: str
 
 
 class Http(BaseModel):
+    """``http`` section: politeness and retry settings for every download."""
+
     user_agent: str
     max_concurrency: int
     max_retries: int
@@ -95,6 +107,8 @@ class Http(BaseModel):
 
 
 class SensorCommunity(BaseModel):
+    """``sensor_community`` section: archive URLs, sensor types, file layout."""
+
     archive_url: str
     live_snapshot_url: str
     pm_types: list[str]
@@ -108,6 +122,8 @@ class SensorCommunity(BaseModel):
 
 
 class Discovery(BaseModel):
+    """``discovery`` section: feasibility study of step 1 (sampled days, countries, radii)."""
+
     sample_day_of_month: int
     listing_concurrency: int
     countries: list[str]
@@ -122,6 +138,8 @@ class Discovery(BaseModel):
 
 
 class Eea(BaseModel):
+    """``eea`` section: download service, vocabularies, flags and the clock offset of the reference."""
+
     api_url: str
     metadata_url: str
     pollutant_vocabulary: str
@@ -142,18 +160,23 @@ class Eea(BaseModel):
 
 
 class Pairing(BaseModel):
+    """``pairing`` section: download and training radii, kept sensor types."""
+
     radius_download_km: float
     radius_train_km: float
     sensor_types: list[str]
 
     @model_validator(mode="after")
     def _nested(self) -> Pairing:
+        """The training radius must lie inside the download radius."""
         if self.radius_train_km > self.radius_download_km:
             raise ValueError("pairing.radius_train_km must not exceed pairing.radius_download_km")
         return self
 
 
 class Particles(BaseModel):
+    """``particles`` section: physical and coherence rules for SDS011 readings."""
+
     max_ugm3: float
     pm25_saturation_ugm3: float
     pm10_saturation_ugm3: float
@@ -165,6 +188,8 @@ class Particles(BaseModel):
 
 
 class Humidity(BaseModel):
+    """``humidity`` section: probe rules (saturation, floor, dead months, stuck values)."""
+
     saturation_pct: float
     max_pct: float
     floor_pct: float
@@ -176,6 +201,8 @@ class Humidity(BaseModel):
 
 
 class Weather(BaseModel):
+    """``weather`` section: choice of the official weather stations and their clock check."""
+
     n_nearest: int
     max_distance_km: float
     clock_check_step_min: int
@@ -184,6 +211,8 @@ class Weather(BaseModel):
 
 
 class Clock(BaseModel):
+    """``clock`` section: lagged-correlation check of every pair and station."""
+
     max_lag_h: int
     min_hours: int
     min_r: float
@@ -192,6 +221,8 @@ class Clock(BaseModel):
 
 
 class Dwd(BaseModel):
+    """``dwd`` section: German weather service open data."""
+
     base_url: str
     station_list: str
     station_list_encoding: str
@@ -200,6 +231,8 @@ class Dwd(BaseModel):
 
 
 class MeteoFrance(BaseModel):
+    """``meteo_france`` section: French hourly climatological data."""
+
     dataset_api_url: str
     resource_title_regex: str
     communes_url: str
@@ -209,6 +242,8 @@ class MeteoFrance(BaseModel):
 
 
 class Evaluation(BaseModel):
+    """``evaluation`` section: EPA targets, minimum hours / days, error bins."""
+
     epa_r2_min: float
     epa_slope_range: tuple[float, float]
     epa_intercept_range: tuple[float, float]
@@ -221,6 +256,8 @@ class Evaluation(BaseModel):
 
 
 class FinalModel(BaseModel):
+    """``models.final`` section: the retained configuration (target scale, constraint, families)."""
+
     log_target: bool
     residual_of: str
     monotone: bool
@@ -230,6 +267,8 @@ class FinalModel(BaseModel):
 
 
 class SearchRange(BaseModel):
+    """One Optuna search range: bounds, log scale, integer or not."""
+
     low: float
     high: float
     log: bool = False
@@ -237,6 +276,8 @@ class SearchRange(BaseModel):
 
 
 class Models(BaseModel):
+    """``models`` section: MLflow, subsample, Optuna budget and LightGBM starting point."""
+
     tracking_uri: str
     experiment: str
     seed: int
@@ -252,6 +293,8 @@ class Models(BaseModel):
 
 
 class Physics(BaseModel):
+    """``physics`` section: gain + kappa physical model and its humidity cap."""
+
     density_ratio: float
     kappa_bounds: tuple[float, float]
     rh_cap_pct: float
@@ -260,6 +303,8 @@ class Physics(BaseModel):
 
 
 class Features(BaseModel):
+    """``features`` section: log floor, local time zone, rolling and missing-rate windows."""
+
     log_floor_ugm3: float
     local_timezone: str
     rolling_hours: list[int]
@@ -271,10 +316,14 @@ class Features(BaseModel):
 
 
 class CrossValidation(BaseModel):
+    """``cv`` section: number of station-wise folds."""
+
     n_folds: int
 
 
 class Generalisation(BaseModel):
+    """``generalisation`` section: step-7 tests (years, distance and age bins, seasons, conformal)."""
+
     train_year: int
     test_year: int
     distance_bins_km: list[float]
@@ -284,11 +333,15 @@ class Generalisation(BaseModel):
 
 
 class Health(BaseModel):
+    """``health`` section: sensor health score from the citizen neighbours."""
+
     min_hours: int
     change_corr_min: float
 
 
 class Sample(BaseModel):
+    """``sample`` section: the small subset used by ``--sample``."""
+
     n_sensors_per_country: int
     month: date
 
@@ -335,6 +388,7 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003 - signature imposed by pydantic
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Read the YAML file (``AIRCALIB_CONFIG``) after explicit arguments and environment variables."""
         yaml_file = Path(os.environ.get("AIRCALIB_CONFIG", DEFAULT_CONFIG))
         return (
             init_settings,
@@ -344,6 +398,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _anchor_paths(self) -> Settings:
+        """Make every relative path absolute from the project root."""
         self.paths = self.paths.resolve(PROJECT_ROOT)
         return self
 

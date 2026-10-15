@@ -69,6 +69,7 @@ def with_status(lf: pl.LazyFrame | pl.DataFrame, cfg: Humidity) -> pl.LazyFrame:
 
 
 def _shares(status: pl.Expr) -> list[pl.Expr]:
+    """Share of each humidity status."""
     return [(status == s).mean().alias(f"{s}_share") for s in (*FAULTS, USABLE)]
 
 

@@ -24,4 +24,5 @@ def setup_logging(level: str | int = "INFO") -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
+    """A named logger (configured once by ``setup_logging``)."""
     return logging.getLogger(name)

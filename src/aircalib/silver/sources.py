@@ -49,12 +49,14 @@ WORKERS = 4  # sensors processed in parallel (Polars itself is multi-threaded)
 
 
 def silver_dir(settings: Settings) -> Path:
+    """The silver folder (created if needed)."""
     path = settings.paths.silver
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _bronze_files(settings: Settings, kind: str, sensor_id: int) -> list[Path]:
+    """Bronze files of one sensor, sorted by month."""
     return sorted((settings.paths.bronze / "sensor_community" / kind / str(sensor_id)).glob("*.parquet"))
 
 
@@ -90,6 +92,7 @@ def station_reference(pairs: pl.DataFrame, eea: pl.DataFrame) -> pl.DataFrame:
 
 
 def clean_particles(settings: Settings, plan: Plan, pairs: pl.DataFrame, eea: pl.DataFrame) -> pl.DataFrame:
+    """Flag every particle reading of the paired sensors and aggregate them hourly (parallel per sensor)."""
     ids = plan.pairs["sensor_id"].to_list()
     reference = station_reference(pairs, eea).partition_by("sensor_id", as_dict=True)
     empty = pl.DataFrame(
@@ -102,6 +105,7 @@ def clean_particles(settings: Settings, plan: Plan, pairs: pl.DataFrame, eea: pl
     )
 
     def one(sensor_id: int) -> pl.DataFrame | None:
+        """Clean one sensor against its station's reference."""
         return clean_pm_sensor(settings, sensor_id, reference.get((sensor_id,), empty))
 
     hourly = []
@@ -178,6 +182,7 @@ def clean_humidity(settings: Settings, plan: Plan) -> pl.DataFrame:
 
 # ------------------------------------------------------------------- reference, weather
 def clean_reference(settings: Settings) -> pl.DataFrame:
+    """Flag the EEA reference hours of the period and write them."""
     files = sorted((settings.paths.bronze / "eea").glob("*/*/*.parquet"))
     out = (
         ref.flag_reference(pl.scan_parquet(files), settings.eea, settings.period.start, settings.period.end)
@@ -198,6 +203,7 @@ def clean_reference(settings: Settings) -> pl.DataFrame:
 
 
 def clean_weather(settings: Settings) -> pl.DataFrame:
+    """Flag the official weather hours (DWD and Météo-France) and write them."""
     max_pct = settings.humidity.max_pct
     frames = []
     dwd_files = sorted((settings.paths.bronze / "dwd").glob("*.parquet"))
@@ -225,6 +231,7 @@ def clean_weather(settings: Settings) -> pl.DataFrame:
 
 
 def run(settings: Settings, plan: Plan) -> None:
+    """Run the silver stage: reference, weather, humidity, segments, then particles."""
     eea = clean_reference(settings)
     clean_weather(settings)
     clean_humidity(settings, plan)

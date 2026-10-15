@@ -656,3 +656,35 @@ Ce journal alimente la section « Choix et limites » du README.
 - **Pourquoi** : chaque run garde ses prédictions hors pli (≈ 46 Mo pour 5,5 M d'heures, 110 Mo pour le test distance).
 - **Contournement** : les 5 fichiers de prédictions des runs d'attribution ont été supprimés (232 Mo) ; leurs métriques et leurs tables restent dans MLflow. L'étude ne les enregistre plus. Les « capteurs bruts » de l'étape 7 n'enregistrent que leurs tables par tranche.
 - **Impact** : `data/` fait 8,7 Gio et `mlruns/` 0,7 Gio, soit ≈ 9,4 Gio.
+
+### [2026-10-15] Décision : retrait de la sonde locale maintenu
+- **Constat** : sur le volume complet, retirer la sonde locale coûte +0,02 µg/m³ de RMSE (paires saines, 3,95 → 3,97). Sur le sous-échantillon de l'étape 6, ce retrait faisait au contraire **gagner** 0,03 µg/m³ (4,30 → 4,27).
+- **Pourquoi** : l'écart change de signe d'un échantillon à l'autre et reste sous 1 % du RMSE : il est dans le bruit. L'argument produit, lui, est réel : la correction n'a besoin d'aucune sonde d'humidité, et ces sondes sont souvent saturées ou mortes (53,5 % des mesures DHT22 saturées, notebook 02).
+- **Contournement** : retrait maintenu (`models.final.drop_families`), décision validée au feu vert de l'étape 7.
+- **Impact** : le modèle final a 45 variables ; le capteur d'un client n'a besoin que de la mesure de particules.
+
+## Étape 8 — Finition et contrôle qualité
+
+### [2026-10-15] Correction : la comparaison à Oslo doit se faire avec le R² par capteur, pas le R² regroupé
+- **Constat** : à l'étape 7, nous avions comparé notre $R^2$ **regroupé** (une seule régression sur 4,7 millions d'heures de 459 paires : 0,18 brut → 0,76 corrigé) au $R^2$ **par capteur** de l'étude d'Oslo (0,55–0,71 → 0,76–0,80). Ce ne sont pas les mêmes mesures. Le $R^2$ médian **par paire** (paires saines, horaire, au moins 500 heures) vaut **0,68 brut → 0,87 corrigé**. L'écart interquartile passe de 0,51–0,77 à 0,80–0,91. La pente médiane passe de 0,61 à 0,85, le RMSE médian de 6,4 à 3,1 µg/m³. En France : 0,65 → 0,70.
+- **Pourquoi** : le $R^2$ regroupé brut est écrasé par les écarts de niveau entre sites et par les pics de quelques capteurs. Chaque capteur pris seul suit déjà assez bien sa station (0,68), mais avec le mauvais gain (pente 0,61).
+- **Contournement** : `evaluation.scoring.pair_distribution` ; table `reports/results/r2_par_paire.csv` ; notebook 07, README et notebook 00 corrigés. Le $R^2$ regroupé reste affiché, avec sa définition.
+- **Impact** : la conclusion change de nature. Brut, nos capteurs sont dans la fourchette d'Oslo (0,68) ; corrigés, ils la dépassent (0,87 contre 0,76–0,80), sur des stations jamais vues. Le gain principal de la correction porte sur le **gain** (pente) et le **biais**, plus que sur la corrélation.
+
+### [2026-10-15] Finition : un notebook de synthèse sans données, des résultats versionnés en CSV
+- **Constat** : pour lire nos résultats, il fallait les données (≈ 9 Go) et la base MLflow, qui ne sont pas versionnées.
+- **Pourquoi** : les notebooks 06–07 relisent les runs MLflow, absents d'un clone neuf.
+- **Contournement** : `python -m aircalib export` (`models/export.py`) écrit 19 petits CSV dans `reports/results/` (96 Ko, versionnés, exception dans `.gitignore`). Le notebook `00_synthese_du_projet.ipynb` ne lit que ces CSV et les figures : il s'exécute en 2 s sans aucune donnée.
+- **Impact** : un lecteur comprend le projet sans rien télécharger ; les notebooks 01 à 07 gardent la preuve complète, avec les données.
+
+### [2026-10-15] Code : deux fonctions mortes retirées, un calcul dupliqué remplacé par la fonction testée
+- **Constat** : une recherche de code mort (`vulture`) a trouvé `tracking.log_figure` et la constante `data.PHYSICS`, jamais utilisées. `data.with_fold_physics` recalculait à la main la formule de `transform.physics.physical_estimate`, testée à part. Cette copie n'avait pas la même gestion des humidités absentes : `min_horizontal` ignore un vide, et une humidité absente aurait reçu $C(95\ \%)$.
+- **Pourquoi** : le calcul hors pli a été écrit à l'étape 6, après la fonction physique de l'étape 5.
+- **Contournement** : les deux éléments morts sont supprimés. `with_fold_physics` appelle désormais `growth_factor` et `physical_estimate`. Nous avons vérifié qu'aucune ligne gold n'a d'humidité absente, nulle ou `NaN` (0 sur 13,82 millions), et que les valeurs sont **identiques bit à bit** sur 500 000 lignes : aucun résultat ne change. Toutes les fonctions et classes ont maintenant une docstring et des annotations de type.
+- **Impact** : une seule implémentation de la formule physique, testée ; un trou potentiel fermé avant qu'il ne serve.
+
+### [2026-10-15] `requirements.txt` installe aussi le paquet
+- **Constat** : avec `pip install -r requirements.txt` seul, les notebooks ne pouvaient pas importer `aircalib` : le fichier était généré avec `--no-emit-project`.
+- **Pourquoi** : l'option retire la ligne du projet lui-même.
+- **Contournement** : `make requirements` génère maintenant la ligne `-e .` (paquet installé en mode modifiable). Version 1.0.0, licence MIT dans `pyproject.toml` et `LICENSE`.
+- **Impact** : une installation avec pip seul suffit pour lancer les notebooks et la ligne de commande (test de reproductibilité ci-dessous).

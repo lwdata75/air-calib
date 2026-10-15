@@ -94,6 +94,7 @@ def sampling_points(
 
 
 def pollutant_uri(cfg: Eea, code: int) -> str:
+    """Vocabulary URI of a pollutant code (the API filters on it)."""
     return f"{cfg.pollutant_vocabulary}/{code}"
 
 
@@ -127,10 +128,12 @@ async def download_parquet(client: PoliteClient, url: str, dest: Path) -> Path:
 
 
 def raw_path(raw_root: Path, pollutant: str, country: str, sampling_point: str) -> Path:
+    """Where the raw file of a sampling point is stored."""
     return raw_root / "eea" / pollutant / country / f"{sampling_point}.parquet"
 
 
 def bronze_path(bronze_root: Path, pollutant: str, country: str, sampling_point: str) -> Path:
+    """Where the bronze file of a sampling point is stored."""
     return bronze_root / "eea" / pollutant / country / f"{sampling_point}.parquet"
 
 

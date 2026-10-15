@@ -33,6 +33,7 @@ WORKERS = 4
 
 
 def pair_id(frame: pl.DataFrame) -> pl.DataFrame:
+    """Pair identifier ``<sensor>-<segment>``."""
     return frame.with_columns(pair_id=pl.format("{}-{}", "sensor_id", "segment"))
 
 
@@ -42,6 +43,7 @@ def sorted_readings(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def _sensor_segments(settings: Settings, sensor_id: int) -> pl.DataFrame | None:
+    """Position segments of one sensor, from its bronze readings."""
     files = sorted((settings.paths.bronze / "sensor_community" / "pm" / str(sensor_id)).glob("*.parquet"))
     if not files:
         return None

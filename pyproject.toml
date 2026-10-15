@@ -1,9 +1,10 @@
 [project]
 name = "aircalib"
-version = "0.1.0"
+version = "1.0.0"
 description = "Make a 30 EUR particulate sensor approach a reference station: Sensor.Community vs EEA calibration pipeline."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
 authors = [{ name = "Leo Weiss" }]
 dependencies = [
     "airbase>=1.0.0",

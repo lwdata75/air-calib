@@ -24,13 +24,13 @@ from aircalib.config import Settings
 from aircalib.ingest.plan import NEAR
 from aircalib.schemas.gold import CATEGORICAL, FEATURES
 from aircalib.transform.features import log_floor
-from aircalib.transform.physics import fit_gain_kappa
+from aircalib.transform.physics import fit_gain_kappa, growth_factor, physical_estimate
 
 TARGET, LOG_TARGET = "reference", "log_reference"
-PHYSICS = ("kohler_c", "physics_pm25", "log_physics_pm25")
 
 
 def gold_path(settings: Settings) -> Path:
+    """The gold table of usable pair-hours with their features."""
     return settings.paths.gold / "pair_hours.parquet"
 
 
@@ -94,11 +94,11 @@ def matrix(frame: pl.DataFrame, features: list[str], cats: dict[str, list[str]])
 
 def with_fold_physics(frame: pl.DataFrame, gain: float, kappa: float, settings: Settings) -> pl.DataFrame:
     """Recompute the physical features of every row with one fold's ``a, kappa``."""
-    cfg = settings.physics
-    capped = pl.min_horizontal("official_humidity", pl.lit(cfg.rh_cap_pct)) / 100
-    c = 1 + (kappa / cfg.density_ratio) / (1 / capped - 1)
-    physics = (gain * pl.col("pm25_mean") / c).cast(pl.Float32)
-    return frame.with_columns(kohler_c=c.cast(pl.Float32), physics_pm25=physics).with_columns(
+    rh, pm = pl.col("official_humidity"), pl.col("pm25_mean")
+    return frame.with_columns(
+        kohler_c=growth_factor(rh, kappa, settings.physics).cast(pl.Float32),
+        physics_pm25=physical_estimate(pm, rh, gain, kappa, settings.physics).cast(pl.Float32),
+    ).with_columns(
         log_physics_pm25=log_floor(pl.col("physics_pm25"), settings.features.log_floor_ugm3).cast(pl.Float32)
     )
 

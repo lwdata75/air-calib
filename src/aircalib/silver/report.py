@@ -69,6 +69,7 @@ HOUR_REASONS = {
 
 
 def _explain(table: pl.DataFrame, reasons: dict[str, str]) -> pl.DataFrame:
+    """Add a readable reason (in French) to each funnel step."""
     mapping = {**COMMON, **reasons}
     return table.with_columns(raison=pl.col("step").replace_strict(mapping, default=pl.col("step"))).select(
         "step", "raison", pl.exclude("step", "raison")
@@ -76,6 +77,7 @@ def _explain(table: pl.DataFrame, reasons: dict[str, str]) -> pl.DataFrame:
 
 
 def particle_funnel(settings: Settings) -> pl.DataFrame:
+    """Funnel of the particle readings, rule by rule."""
     readings = pl.scan_parquet(settings.paths.silver / "sensor_community" / "pm" / "*.parquet").with_columns(
         pl.col(pt.FLAG).cast(pl.String)
     )
@@ -85,6 +87,7 @@ def particle_funnel(settings: Settings) -> pl.DataFrame:
 
 
 def humidity_funnels(settings: Settings) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Funnels of the humidity readings and of the probe hours."""
     sc = settings.paths.silver / "sensor_community"
     counts = pl.read_parquet(sc / "humidity_status.parquet").with_columns(
         status=pl.when(pl.col("status") == hum.USABLE).then(pl.lit(OK)).otherwise(pl.col("status"))
@@ -103,6 +106,7 @@ def humidity_funnels(settings: Settings) -> tuple[pl.DataFrame, pl.DataFrame]:
 
 
 def reference_funnel(settings: Settings) -> pl.DataFrame:
+    """Funnel of the EEA reference hours, per pollutant."""
     eea = pl.read_parquet(settings.paths.silver / "eea" / "hourly.parquet")
     rules = [r for r in ref.RULES if r != ref.OUTSIDE_PERIOD]
     tables = [
@@ -115,11 +119,13 @@ def reference_funnel(settings: Settings) -> pl.DataFrame:
 
 
 def weather_funnel(settings: Settings) -> pl.DataFrame:
+    """Funnel of the official weather hours."""
     weather = pl.read_parquet(settings.paths.silver / "weather" / "hourly.parquet")
     return funnel(weather, "humidity_flag", list(wx.RULES), {"stations": ["source", "station_id"]})
 
 
 def pair_funnel(hours: pl.DataFrame) -> pl.DataFrame:
+    """Funnel of the pair-hours, rule by rule (hours, sensors, pairs, stations)."""
     return funnel(
         hours,
         "status",
@@ -129,6 +135,7 @@ def pair_funnel(hours: pl.DataFrame) -> pl.DataFrame:
 
 
 def usable_by(hours: pl.DataFrame, by: list[str]) -> pl.DataFrame:
+    """Usable pair-hours, pairs and stations per group."""
     usable = hours.filter(pl.col("status") == OK)
     return (
         usable.group_by(by)
@@ -145,6 +152,7 @@ def usable_by(hours: pl.DataFrame, by: list[str]) -> pl.DataFrame:
 
 
 def build(settings: Settings) -> tuple[str, dict[str, pl.DataFrame]]:
+    """The funnel report (Markdown) and its tables."""
     pairs_dir = settings.paths.silver / "pairs"
     hours = pl.read_parquet(pairs_dir / "pair_hours.parquet")
     clock_check = pl.read_parquet(pairs_dir / "clock_check.parquet")
@@ -226,6 +234,7 @@ def build(settings: Settings) -> tuple[str, dict[str, pl.DataFrame]]:
 
 
 def write(settings: Settings) -> Path:
+    """Write the funnel report to ``reports/``; returns its path."""
     text, _ = build(settings)
     name = "funnel_sample.md" if settings.paths.sample else "funnel.md"
     dest = settings.paths.reports_dir / name

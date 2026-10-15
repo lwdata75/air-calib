@@ -151,6 +151,7 @@ def monthly_cadence(readings: pl.DataFrame | pl.LazyFrame, max_gap_s: int) -> pl
 
 
 def _stats(column: str, name: str) -> list[pl.Expr]:
+    """Mean, median and standard deviation of the valid readings of the hour."""
     value = pl.col(column).filter(pl.col(FLAG) == OK)
     return [
         value.mean().alias(f"{name}_mean"),

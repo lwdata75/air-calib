@@ -95,14 +95,17 @@ def bronze_frame(product: pl.DataFrame, start: date, end: date) -> pl.DataFrame:
 
 
 def raw_path(raw_root: Path, filename: str) -> Path:
+    """Where a raw DWD zip file is stored."""
     return raw_root / "dwd" / filename
 
 
 def bronze_path(bronze_root: Path, station_id: int) -> Path:
+    """Where the bronze table of one DWD station is stored."""
     return bronze_root / "dwd" / f"{station_id:05d}.parquet"
 
 
 async def fetch_text(client: PoliteClient, url: str, encoding: str = "utf-8") -> str:
+    """GET a text file (the station list is Latin-1)."""
     response = await client.get(url)
     response.raise_for_status()
     return response.content.decode(encoding)

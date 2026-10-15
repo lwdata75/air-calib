@@ -12,6 +12,7 @@ import polars as pl
 
 
 def confusion(score: np.ndarray, label: np.ndarray, threshold: float) -> dict[str, float]:
+    """Pairs flagged below ``threshold``, true positives, precision, recall and F1 against ``label``."""
     flagged = score < threshold
     tp = int((flagged & label).sum())
     precision = tp / flagged.sum() if flagged.sum() else float("nan")

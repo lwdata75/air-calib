@@ -59,6 +59,7 @@ def _cell(value: object) -> str:
 
 
 def _table(frame: pl.DataFrame) -> str:
+    """A frame as a Markdown table."""
     if frame.is_empty():
         return "_(rien)_\n"
     head = "| " + " | ".join(frame.columns) + " |"
@@ -71,6 +72,7 @@ def _table(frame: pl.DataFrame) -> str:
 
 
 def build(settings: Settings) -> str:
+    """The ingestion report (Markdown): volumes, failures and disk use per source."""
     paths = settings.paths
     raw_m, bronze_m = sc_manifests(settings)
     sc = sensor_community_summary(raw_m.frame(), bronze_m.frame())
@@ -116,6 +118,7 @@ def build(settings: Settings) -> str:
 
 
 def write(settings: Settings) -> Path:
+    """Write the ingestion report to ``reports/``; returns its path."""
     name = "ingestion_sample.md" if settings.paths.sample else "ingestion.md"
     dest = settings.paths.reports_dir / name
     dest.parent.mkdir(parents=True, exist_ok=True)

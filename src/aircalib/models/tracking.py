@@ -12,6 +12,7 @@ import json
 import math
 import os
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from aircalib.models.cv import CrossValidation
 
 
 def setup(settings: Settings) -> None:
+    """Point MLflow to the local SQLite store and the project's experiment."""
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
     root = settings.paths.data_dir.parent
     mlflow.set_tracking_uri(settings.models.tracking_uri.replace("sqlite:///", f"sqlite:///{root}/"))
@@ -34,7 +36,8 @@ def setup(settings: Settings) -> None:
 
 
 @contextmanager
-def run(name: str, *, nested: bool = False, tags: dict | None = None):
+def run(name: str, *, nested: bool = False, tags: dict | None = None) -> Iterator[mlflow.ActiveRun]:
+    """An MLflow run (optionally nested in the active one)."""
     with mlflow.start_run(run_name=name, nested=nested, tags=tags or {}) as active:
         yield active
 
@@ -85,10 +88,6 @@ def log_cv(
             result.oof.write_parquet(folder / "oof_predictions.parquet", compression="zstd")
         mlflow.log_artifacts(str(folder))
     return flat
-
-
-def log_figure(fig, name: str) -> None:
-    mlflow.log_figure(fig, name)
 
 
 def rescore(settings: Settings, run_ids: list[str]) -> int:

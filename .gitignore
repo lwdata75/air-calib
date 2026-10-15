@@ -4,6 +4,7 @@ mlruns/
 mlflow.db
 *.parquet
 *.csv
+!reports/results/*.csv
 *.csv.gz
 *.zip
 

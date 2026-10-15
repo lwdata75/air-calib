@@ -133,6 +133,7 @@ def _physics(gold: pl.DataFrame, settings: Settings) -> tuple[pl.DataFrame, pl.D
 
 
 def build(settings: Settings) -> dict[str, pl.DataFrame]:
+    """Build and write the gold tables: usable pair-hours, features, folds, out-of-fold physics."""
     silver = settings.paths.silver
     f = settings.features
     hours = pl.read_parquet(silver / "pairs" / "pair_hours.parquet").with_columns(

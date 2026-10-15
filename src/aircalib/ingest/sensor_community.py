@@ -113,6 +113,7 @@ def read_day_csv(content: bytes, gzipped: bool) -> pl.DataFrame:
 
 
 async def fetch_listing(client: PoliteClient, url: str) -> list[str]:
+    """File names of one archive day (empty when the day does not exist)."""
     response = await client.get(url)
     if response.status_code == 404:
         return []
@@ -132,6 +133,7 @@ async def fetch_head(client: PoliteClient, url: str, n_bytes: int) -> dict[str, 
 
 
 async def fetch_file(client: PoliteClient, url: str) -> bytes | None:
+    """Content of one archive file, or ``None`` when it does not exist (404)."""
     response = await client.get(url)
     if response.status_code == 404:
         return None
@@ -172,6 +174,7 @@ def bronze_frame(
     floats = [c for c, dtype in schema.items() if dtype == pl.Float64]
 
     def cast(c: str, dtype: pl.DataType) -> pl.Expr:
+        """Typed expression for one column (decimal commas accepted, timestamps parsed)."""
         if c == "timestamp":
             return pl.col(c).str.strptime(pl.Datetime("us"), timestamp_format, strict=False)
         text = pl.col(c).str.strip_chars()
@@ -217,4 +220,5 @@ def raw_unit_dir(raw_root: Path, sensor_id: int, month: date) -> Path:
 
 
 def bronze_unit_path(bronze_root: Path, kind: str, sensor_id: int, month: date) -> Path:
+    """Where the bronze file of one sensor-month is stored."""
     return bronze_root / kind / str(sensor_id) / f"{month.strftime('%Y-%m')}.parquet"

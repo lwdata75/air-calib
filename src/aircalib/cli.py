@@ -31,12 +31,14 @@ VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v", help="Debug logging
 
 
 def _settings(sample: bool) -> Settings:
+    """Full-volume settings, or the sample ones with ``--sample``."""
     settings = get_settings()
     return settings.for_sample() if sample else settings
 
 
 @app.callback()
 def _main(verbose: VerboseOpt = False) -> None:
+    """Common options of every command (log level)."""
     setup_logging("DEBUG" if verbose else "INFO")
 
 
@@ -108,6 +110,14 @@ def train(
     from aircalib.models import studies  # noqa: PLC0415 - imports LightGBM
 
     studies.run(_settings(sample), study)
+
+
+@app.command()
+def export() -> None:
+    """Steps 6-7: write the key result tables to ``reports/results/`` (light CSV files, versioned)."""
+    from aircalib.models.export import export as export_results  # noqa: PLC0415 - reads MLflow
+
+    export_results(_settings(False))
 
 
 @app.command(name="all")

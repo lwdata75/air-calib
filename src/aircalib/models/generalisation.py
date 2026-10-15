@@ -63,6 +63,7 @@ def slice_expressions(settings: Settings) -> dict[str, pl.Expr]:
 
 
 def _slices(settings: Settings, *names: str) -> dict[str, pl.Expr]:
+    """The named breakdown expressions."""
     every = slice_expressions(settings)
     return {n: every[n] for n in names}
 
@@ -82,6 +83,7 @@ def _logged_predictions(ctx: Context, parent: str, run: str) -> pl.DataFrame:
 
 # ------------------------------------------------------------------------------- time
 def temporal(ctx: Context) -> None:
+    """Train on one year, test on the next: same stations (a), new stations (b), and the 2025 control (b0)."""
     g, settings = ctx.settings.generalisation, ctx.settings
     year = pl.col("hour").dt.year()
     first, second = year == g.train_year, year == g.test_year
@@ -91,6 +93,7 @@ def temporal(ctx: Context) -> None:
     slices = _slices(settings, "age", "type_station", "saison")
 
     def fold_splits_between(train_year: pl.Expr, test_year: pl.Expr) -> list[Split]:
+        """Station folds: train on ``train_year``, test on ``test_year``, physics refitted per split."""
         splits = []
         for fold in range(settings.cv.n_folds):
             train = TRAIN & train_year & (pl.col("fold") != fold)
@@ -140,6 +143,7 @@ def temporal(ctx: Context) -> None:
 
 # ------------------------------------------------------------------------------- distance
 def distance(ctx: Context) -> None:
+    """Station folds over every distance band, up to 3 km (raw sensor logged on the same rows)."""
     make, features = retained(ctx)
     slices = _slices(ctx.settings, "distance", "bande", "type_station")
     with tracking.run("test_distance", tags={"scope": ctx.scope}):
@@ -156,6 +160,7 @@ def distance(ctx: Context) -> None:
 
 # ------------------------------------------------------------------------------- France
 def france(ctx: Context) -> None:
+    """Train on every sane German near pair and predict France as is (raw sensor on the same rows)."""
     settings = ctx.settings
     fit = ctx.fits.filter(pl.col("fold") == ALL_FOLDS).row(0, named=True)
     split = [Split(TRAIN, pl.col("country") == settings.study.transfer_country, fit["gain"], fit["kappa"])]
@@ -176,6 +181,7 @@ def france(ctx: Context) -> None:
 
 # ------------------------------------------------------------------------------- breakdowns, interval
 def breakdowns(ctx: Context) -> None:
+    """The final model's 5-fold predictions by station type, method, season, humidity and sensor age."""
     final = _logged_predictions(ctx, FINAL_PARENT, FINAL_RUN)
     slices = _slices(ctx.settings, "type_station", "methode", "saison", "humidite", "age")
     with tracking.run("decoupages", tags={"scope": ctx.scope}):

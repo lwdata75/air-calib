@@ -84,6 +84,7 @@ def _reference(eea: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
 
 
 def _pm10_by_station(settings: Settings, pm10: pl.DataFrame) -> pl.DataFrame:
+    """The best PM10 sampling point of each station (most valid hours)."""
     points = pl.read_parquet(reference_dir(settings) / "eea_sampling_points.parquet").filter(
         pl.col("pollutant") == "pm10"
     )
@@ -130,6 +131,7 @@ def _official(chosen: pl.DataFrame, weather: pl.DataFrame) -> pl.DataFrame:
     fallback_ok = (pl.col("flag_2") == wx.OK).fill_null(False)
 
     def pick(column: str) -> pl.Expr:
+        """Value of the main weather station, or of the fallback when the main one is missing."""
         return pl.when(main_ok).then(pl.col(f"{column}_1")).when(fallback_ok).then(pl.col(f"{column}_2"))
 
     return both.select(
@@ -164,6 +166,7 @@ def local_humidity_by_site(settings: Settings, probes: pl.DataFrame) -> pl.DataF
 
 
 def _status() -> pl.Expr:
+    """Status of a pair-hour: the first failed rule among sensor, station, clock and weather."""
     reference_flag = pl.col("ref_pm25_flag")
     return (
         pl.when(pl.col("hour_flag") != pt.OK)
@@ -185,6 +188,7 @@ def _status() -> pl.Expr:
 
 
 def build(settings: Settings) -> dict[str, pl.DataFrame]:
+    """Join each segment's hours with its reference, weather and probe; check clocks; write ``pair_hours``."""
     silver = silver_dir(settings)
     sc = silver / "sensor_community"
     pm_hourly = pl.read_parquet(sc / "pm_hourly.parquet")

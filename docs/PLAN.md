@@ -11,8 +11,8 @@ Règle : une étape à la fois ; à la fin de chaque étape, résumé et feu ver
 | 4 | Exploration des heures-paires | ✅ terminé | `evaluation/metrics.py` (régression, cibles EPA, profils d'erreur), `notebooks/04_exploration_paires.ipynb` |
 | 5 | Feature engineering (couche gold) | ✅ terminé | `gold/build.py`, `transform/{physics,features,neighbours}.py`, `evaluation/{folds,metrics}.py`, `schemas/gold.py`, `notebooks/05_features_gold.ipynb`, `python -m aircalib features` |
 | 6 | Modélisation + MLflow | ✅ terminé | `models/{data,ladder,cv,tracking,studies,results,runtime}.py`, `evaluation/{scoring,health}.py`, `notebooks/06_modeles.ipynb`, `python -m aircalib train --study <étude>`, `make train` |
-| 7 | Évaluation finale, transfert, conclusions | ✅ terminé — en attente de feu vert | `models/generalisation.py`, `evaluation/conformal.py`, `notebooks/07_evaluation_finale.ipynb`, `make evaluate` |
-| 8 | Finition | ⏳ à faire | README final, `make sample` depuis un clone propre, requirements, lint/tests au vert |
+| 7 | Évaluation finale, transfert, conclusions | ✅ terminé | `models/generalisation.py`, `evaluation/conformal.py`, `notebooks/07_evaluation_finale.ipynb`, `make evaluate` |
+| 8 | Finition et contrôle qualité | ✅ terminé — en attente de validation | `notebooks/00_synthese_du_projet.ipynb`, `reports/results/*.csv` (`python -m aircalib export`), README final, notebooks 01–07 réécrits, LICENSE, tag `v1.0` |
 
 ## Décisions prises (feu vert du 14/10/2026)
 - **Appariement : 1 capteur = 1 station**, la plus proche ayant des heures vérifiées pendant l'activité du capteur ;

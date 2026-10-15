@@ -28,6 +28,8 @@ OPTIONAL = ["country", "distance_band", "distance_km", "age_years", "official_hu
 
 @dataclass
 class CrossValidation:
+    """Out-of-fold predictions of one study and what it cost (fit and predict seconds, importances)."""
+
     oof: pl.DataFrame
     seconds_fit: list[float] = field(default_factory=list)
     seconds_predict: list[float] = field(default_factory=list)

@@ -1,0 +1,13 @@
+calibration,paires,voisins,couverture_avant,couverture_apres,largeur_mediane_avant,largeur_mediane_apres
+global,saines,toutes,0.624,0.798,4.020,6.020
+global,saines,avec_voisins,0.623,0.809,3.740,5.750
+global,saines,sans_voisins,0.627,0.754,5.160,6.970
+global,toutes,toutes,0.618,0.789,4.110,6.100
+global,toutes,avec_voisins,0.623,0.806,3.830,5.840
+global,toutes,sans_voisins,0.603,0.727,5.200,7.010
+par_voisinage,saines,toutes,0.624,0.797,4.020,6.040
+par_voisinage,saines,avec_voisins,0.623,0.797,3.740,5.580
+par_voisinage,saines,sans_voisins,0.627,0.796,5.160,7.830
+par_voisinage,toutes,toutes,0.618,0.788,4.110,6.120
+par_voisinage,toutes,avec_voisins,0.623,0.794,3.830,5.670
+par_voisinage,toutes,sans_voisins,0.603,0.768,5.200,7.850

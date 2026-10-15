@@ -132,26 +132,31 @@ def station_table(bronze: pl.DataFrame) -> pl.DataFrame:
 
 
 def raw_path(raw_root: Path, url: str) -> Path:
+    """Where a raw Météo-France file is stored (its name in the URL)."""
     return raw_root / "meteo_france" / url.rsplit("/", 1)[-1]
 
 
 def bronze_path(bronze_root: Path, station_id: int) -> Path:
+    """Where the bronze table of one Météo-France station is stored."""
     return bronze_root / "meteo_france" / f"{station_id}.parquet"
 
 
 async def fetch_json(client: PoliteClient, url: str) -> dict | list:
+    """GET and parse a JSON document."""
     response = await client.get(url)
     response.raise_for_status()
     return json.load(io.BytesIO(response.content))
 
 
 async def resources(client: PoliteClient, cfg: MeteoFrance) -> pl.DataFrame:
+    """The hourly resources of the dataset (one per department and period)."""
     dataset = await fetch_json(client, cfg.dataset_api_url)
     assert isinstance(dataset, dict)
     return parse_resources(dataset, cfg.resource_title_regex)
 
 
 async def communes(client: PoliteClient, cfg: MeteoFrance) -> pl.DataFrame:
+    """Commune centres with their department (to find the departments near a station)."""
     records = await fetch_json(client, cfg.communes_url)
     assert isinstance(records, list)
     return parse_communes(records, cfg.department_aliases)

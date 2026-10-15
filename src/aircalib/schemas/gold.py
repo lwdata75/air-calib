@@ -37,6 +37,8 @@ F32 = pl.Float32
 
 
 class GoldPairHours(pa.DataFrameModel):
+    """Contract of the gold table: keys, target, the 48 features, folds and statuses."""
+
     pair_id: pl.String = pa.Field(nullable=False)
     sensor_id: pl.Int64 = pa.Field(nullable=False)
     segment: pl.UInt32 = pa.Field(nullable=False)

@@ -27,6 +27,7 @@ class PoliteClient:
     """Thin wrapper around :class:`httpx.AsyncClient` with a semaphore and retries."""
 
     def __init__(self, client: httpx.AsyncClient, cfg: Http) -> None:
+        """Wrap an ``httpx`` client with a concurrency limit and the retry settings."""
         self._client = client
         self._cfg = cfg
         self._semaphore = asyncio.Semaphore(cfg.max_concurrency)
@@ -57,6 +58,7 @@ class PoliteClient:
         raise RuntimeError(f"giving up on {url} after {self._cfg.max_retries} retries") from last_error
 
     async def post_json(self, url: str, payload: dict) -> httpx.Response:
+        """POST a JSON payload under the concurrency limit; raises on HTTP errors."""
         async with self._semaphore:
             response = await self._client.post(url, json=payload)
         response.raise_for_status()

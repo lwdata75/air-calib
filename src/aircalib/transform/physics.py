@@ -54,6 +54,8 @@ def _growth_terms(rh: np.ndarray, cfg: Physics) -> np.ndarray:
 
 @dataclass(frozen=True)
 class PhysicalFit:
+    """Fitted gain and kappa, with the log error with and without the humidity term."""
+
     gain: float
     kappa: float
     mse_log: float  # mean squared error on ln PM
@@ -72,6 +74,7 @@ def fit_gain_kappa(log_raw: np.ndarray, log_ref: np.ndarray, rh: np.ndarray, cfg
     base = log_ref - log_raw
 
     def error(kappa: float) -> tuple[float, float]:
+        """Log error of the model for one kappa, and the best ln gain for it."""
         residual = base + np.log1p(kappa / cfg.density_ratio * terms)
         log_gain = float(residual.mean())
         return float(((residual - log_gain) ** 2).mean()), log_gain

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
+from types import ModuleType
 
 import polars as pl
 
 from aircalib.config import Settings
 
 
-def _client(settings: Settings):
+def _client(settings: Settings) -> ModuleType:
+    """The MLflow module, pointed at the project's tracking store."""
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
     import mlflow  # noqa: PLC0415
 
@@ -54,6 +56,7 @@ def summary(table: pl.DataFrame, subset: str = "saines") -> pl.DataFrame:
 
 
 def artifact(settings: Settings, run_id: str, path: str) -> str:
+    """Download one artifact of a run (cached locally by MLflow); returns its local path."""
     mlflow = _client(settings)
     return mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=path)
 

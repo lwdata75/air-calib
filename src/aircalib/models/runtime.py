@@ -17,6 +17,7 @@ FLAG = "AIRCALIB_OPENMP_READY"
 
 
 def openmp_dir() -> Path | None:
+    """Folder of the ``libomp.dylib`` shipped with scikit-learn, if present."""
     import sklearn  # noqa: PLC0415 - only needed on macOS, and only here
 
     candidate = Path(sklearn.__file__).parent / ".dylibs"

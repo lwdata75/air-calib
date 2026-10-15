@@ -46,6 +46,7 @@ def write_atomic(dest: Path, content: bytes) -> None:
 
 
 def sc_manifests(settings: Settings) -> tuple[Manifest, Manifest]:
+    """The raw and bronze manifests of Sensor.Community (key: sensor and month)."""
     key = ("sensor_id", "month")
     raw = Manifest(settings.paths.raw / "sensor_community" / "_manifest.jsonl", key)
     bronze = Manifest(settings.paths.bronze / "sensor_community" / "_manifest.jsonl", key)
@@ -63,11 +64,13 @@ class _Ticker:
     """Logs progress every ``every_s`` seconds (works without a terminal)."""
 
     def __init__(self, label: str, total: int, every_s: float) -> None:
+        """Progress counter for one source."""
         self.label, self.total, self.every_s = label, total, every_s
         self.done = self.files = self.bytes = 0
         self.start = self.last = time.monotonic()
 
     def update(self, files: int, n_bytes: int) -> None:
+        """Count one finished unit and log the progress at most every ``every_s`` seconds."""
         self.done += 1
         self.files += files
         self.bytes += n_bytes
@@ -93,11 +96,13 @@ class _Ticker:
 async def _download_unit(
     client: PoliteClient, settings: Settings, unit: dict, raw_root: Path, today: date
 ) -> dict:
+    """Download every day of one sensor-month; returns its manifest record."""
     cfg = settings.sensor_community
     folder = sc.raw_unit_dir(raw_root, unit["sensor_id"], unit["month"])
     days = [unit["first_day"] + timedelta(days=i) for i in range(unit["n_days"])]
 
     async def one(day: date) -> tuple[str, int]:
+        """Download one sensor-day file (absent days return no bytes)."""
         url = sc.file_url(
             cfg.archive_url,
             sensor_type=unit["sensor_type"],
@@ -163,6 +168,7 @@ async def download_sensor_community(settings: Settings, plan: Plan, today: date)
     async with polite_client(settings.http) as client:
 
         async def worker() -> None:
+            """Take units from the queue until it is empty, recording each one in the manifest."""
             nonlocal failures
             while not queue.empty():
                 unit = queue.get_nowait()
@@ -198,6 +204,7 @@ async def eea_sampling_points(settings: Settings, plan: Plan) -> pl.DataFrame:
 
 
 async def download_eea(settings: Settings, plan: Plan) -> int:
+    """Download the EEA files of the planned sampling points; returns the number of failures."""
     points = await eea_sampling_points(settings, plan)
     points.write_parquet(reference_dir(settings) / "eea_sampling_points.parquet")
     manifest = Manifest(settings.paths.raw / "eea" / "_manifest.jsonl", ("pollutant", "sampling_point"))
@@ -208,6 +215,7 @@ async def download_eea(settings: Settings, plan: Plan) -> int:
     async with polite_client(settings.http) as client:
 
         async def one(rec: dict) -> None:
+            """Download one EEA file unless it is already in raw or bronze."""
             nonlocal failures
             dest = eea.raw_path(settings.paths.raw, rec["pollutant"], rec["country"], rec["sampling_point"])
             key = {"pollutant": rec["pollutant"], "sampling_point": rec["sampling_point"]}
@@ -259,6 +267,7 @@ async def select_dwd_stations(settings: Settings, client: PoliteClient, plan: Pl
 
 
 async def download_dwd(settings: Settings, plan: Plan) -> int:
+    """Download the DWD files of the planned weather stations; returns the number of failures."""
     if plan_stations(plan).filter(pl.col("country") == "DE").is_empty():
         return 0
     manifest = Manifest(settings.paths.raw / "dwd" / "_manifest.jsonl", ("filename",))
@@ -269,6 +278,7 @@ async def download_dwd(settings: Settings, plan: Plan) -> int:
         files = selected.select("filename").unique()
 
         async def one(filename: str) -> None:
+            """Download one DWD file unless it is already in raw or bronze."""
             nonlocal failures
             dest = dwd.raw_path(settings.paths.raw, filename)
             if dest.exists() or (filename,) in bronze_done:
@@ -294,6 +304,7 @@ async def download_dwd(settings: Settings, plan: Plan) -> int:
 
 # ------------------------------------------------------------------ Meteo-France
 async def download_meteo_france(settings: Settings, plan: Plan) -> int:
+    """Download the Météo-France files of the departments near the stations; returns the failures."""
     targets = plan_stations(plan).filter(pl.col("country") == "FR")
     if targets.is_empty():
         return 0
@@ -309,6 +320,7 @@ async def download_meteo_france(settings: Settings, plan: Plan) -> int:
         files.write_parquet(reference_dir(settings) / "meteo_france_files.parquet")
 
         async def one(url: str) -> None:
+            """Download one Météo-France file unless it is already in raw or bronze."""
             nonlocal failures
             dest = meteo_france.raw_path(settings.paths.raw, url)
             if dest.exists() or (dest.name,) in bronze_done:

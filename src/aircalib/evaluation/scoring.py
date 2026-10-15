@@ -25,6 +25,7 @@ METRICS = ("rmse", "mae", "r2", "slope", "intercept", "bias")
 
 
 def _as_sensor(oof: pl.DataFrame) -> pl.DataFrame:
+    """Rename ``prediction`` to the metrics' ``sensor`` column."""
     return oof.rename({"prediction": SENSOR}) if "prediction" in oof.columns else oof
 
 
@@ -120,6 +121,20 @@ def score_slices(oof: pl.DataFrame, by: pl.Expr, cfg: Evaluation, name: str = "t
     if not tables:
         return pl.DataFrame()
     return pl.concat(tables, how="diagonal_relaxed").select(name, pl.exclude(name))
+
+
+def pair_distribution(oof: pl.DataFrame, cfg: Evaluation) -> dict[str, float]:
+    """Distribution over pairs of the per-pair hourly R², slope and RMSE (pairs with ``min_hours``).
+
+    The pooled R² of ``score`` mixes hundreds of sites in one regression; the median
+    per-pair R² is the figure comparable with single-site studies.
+    """
+    per_pair = regression_metrics(_as_sensor(oof), ["pair_id"]).filter(pl.col("n") >= cfg.min_hours)
+    out: dict[str, float] = {"pairs": float(per_pair.height)}
+    for metric in ("r2", "slope", "rmse"):
+        for name, q in (("q25", 0.25), ("median", 0.5), ("q75", 0.75)):
+            out[f"{metric}_{name}"] = float(per_pair[metric].quantile(q)) if per_pair.height else float("nan")
+    return out
 
 
 def interval_coverage(oof: pl.DataFrame, lower: str, upper: str) -> dict[str, float]:

@@ -24,6 +24,7 @@ MF_DOUBTFUL_CODE = 2
 
 
 def _humidity_flag(rh: pl.Expr, doubtful: pl.Expr, max_pct: float) -> pl.Expr:
+    """Status of an official humidity value: missing, doubtful, out of range or ok."""
     return (
         pl.when(rh.is_null() | rh.is_nan())
         .then(pl.lit(MISSING))
