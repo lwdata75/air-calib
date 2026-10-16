@@ -129,8 +129,7 @@ def principal(echantillon: bool) -> None:
         {"etape": "paires défectueuses", "unite": "paires", "nombre": int((~controles["paire_saine"]).sum())},
     ]
     entonnoir = pl.DataFrame(lignes)
-    nom = "entonnoir_echantillon.csv" if echantillon else "entonnoir.csv"
-    entonnoir.write_csv(P.RAPPORTS / nom)
+    entonnoir.write_csv(racine / "entonnoir.csv" if echantillon else P.RAPPORTS / "entonnoir.csv")
     print(entonnoir)
     print(f"Terminé en {(time.time() - depart) / 60:.1f} min : {completes.height:,} heures-paires.")
 

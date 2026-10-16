@@ -23,7 +23,7 @@ import polars as pl
 
 from aircalib import parametres as P
 from aircalib import telechargement as T
-from aircalib.geo import plus_proche
+from aircalib.geo import distance_km, plus_proche
 
 
 def les_15_du_mois(echantillon: bool) -> list[date]:
@@ -147,8 +147,13 @@ async def principal(echantillon: bool) -> None:
 
         print("4. Référence EEA des stations proches d'un capteur…", flush=True)
         urls = await T.urls_eea(client)
-        proches = plus_proche(
-            positions, stations.select("point", "lat", "lon"), cle="point", rayon_km=P.RAYON_KM
+        # Tous les points à 1,5 km ou moins d'un capteur, pas seulement le plus proche : une station peut
+        # avoir un ancien identifiant sans données, et une voisine avec des données.
+        proches = (
+            positions.join(stations.select("point", lat_s="lat", lon_s="lon"), how="cross")
+            .filter(distance_km(pl.col("lat"), pl.col("lon"), pl.col("lat_s"), pl.col("lon_s")) <= P.RAYON_KM)
+            .select("point")
+            .unique()
         )
         a_telecharger = sorted(set(proches["point"]) & set(urls))
         for point in a_telecharger:

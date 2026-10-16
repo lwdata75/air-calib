@@ -1,0 +1,19 @@
+etape,unite,nombre
+mesures brutes,mesures,148636757
+retiré : vide,mesures,-384700
+retiré : code d'erreur (négatif),mesures,0
+retiré : plafond du capteur,mesures,-852621
+retiré : PM2.5 > PM10,mesures,-118
+retiré : plateau 0/0 ≥ 1 h,mesures,-538949
+retiré : capteur déplacé de plus de 1 km,mesures,-3193367
+mesures gardées,mesures,143667002
+heures avec au moins une mesure,heures,6098098
+retiré : heure incomplète (< 75 %),heures,-331442
+retiré : pas de référence EEA valide,heures,-304193
+retiré : pas de météo DWD ou hors période,heures,-51832
+heures-paires gardées,heures,5410631
+  dont paires saines,heures,4401479
+capteurs sans aucune mesure,capteurs,0
+capteurs déplacés de plus de 1 km,capteurs,12
+paires saines,paires,419
+paires défectueuses,paires,122

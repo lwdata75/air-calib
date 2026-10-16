@@ -1,7 +1,11 @@
 # Les commandes du projet. « make sample » teste toute la chaîne en quelques minutes.
 PY := uv run python
 
-.PHONY: install requirements data sample train test lint
+# macOS : LightGBM a besoin d'OpenMP. Sans Homebrew, on pointe vers la copie livrée avec scikit-learn
+# (la variable doit être donnée directement à Python : `uv run` ne la transmet pas).
+OPENMP := DYLD_FALLBACK_LIBRARY_PATH=$(shell .venv/bin/python -c "import sklearn, pathlib; print(pathlib.Path(sklearn.__file__).parent / '.dylibs')" 2>/dev/null)
+
+.PHONY: install requirements data sample train notebooks test lint
 
 install:  ## crée l'environnement à partir de uv.lock
 	uv sync --frozen
@@ -21,6 +25,9 @@ sample:  ## la même chaîne sur 10 capteurs et un mois
 
 train:  ## entraîne les modèles retenus sur toutes les stations (5 plis)
 	$(PY) scripts/04_entrainer.py
+
+notebooks:  ## réexécute les notebooks 01 à 04
+	$(OPENMP) .venv/bin/jupyter nbconvert --to notebook --execute --inplace notebooks/0[1-4]_*.ipynb
 
 test:  ## tests unitaires (hors ligne)
 	uv run pytest -q
