@@ -31,12 +31,11 @@ EEA_METADONNEES = (
 )
 EEA_API = "https://eeadmz1-downloads-api-appservice.azurewebsites.net"
 EEA_PM25 = "http://dd.eionet.europa.eu/vocabulary/aq/pollutant/6001"
-DWD = (
-    "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/hourly/air_temperature/historical"
-)
+DWD = "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/hourly/air_temperature/historical"
 
 # --- Téléchargement poli ------------------------------------------------------------------------
-USER_AGENT = "air-calib/1.0 (+https://github.com/lwdata75/air-calib; projet étudiant)"
+# En-tête HTTP qui dit qui on est (les en-têtes n'acceptent que de l'ASCII, d'où l'anglais).
+USER_AGENT = "air-calib/1.0 (+https://github.com/lwdata75/air-calib; student project)"
 REQUETES_SIMULTANEES = 8  # les serveurs de Sensor.Community sont financés par des bénévoles
 LISTINGS_SIMULTANES = 2  # une liste de fichiers d'un jour pèse ~5 Mo : le serveur coupe au-delà de 2
 ESSAIS_MAX = 5  # nouvelles tentatives en cas d'erreur réseau passagère
@@ -54,6 +53,7 @@ DEPLACEMENT_MAX_KM = 1.0  # un capteur qui a bougé de plus de 1 km est écarté
 EEA_DECALAGE_H = 1  # mesuré dans le notebook 01 : heure UTC = Start − 1 h
 EEA_VALIDITES = [1, 2, 3]  # codes « valide » (2 et 3 : sous la limite de détection)
 EEA_MANQUANT = -999.0
+HEURES_MIN_STATION = 500  # une station sert de référence si elle a au moins 500 heures valides
 
 # --- Paires défectueuses ------------------------------------------------------------------------
 # Un capteur dont les variations horaires ne suivent pas celles de sa station est probablement en panne.
@@ -79,3 +79,8 @@ HEURES_MIN_PAIRE = 500  # une paire est notée en horaire si elle a au moins 500
 JOURS_MIN_PAIRE = 30  # … et en journalier si elle a au moins 30 jours complets
 HEURES_MIN_JOUR = 18  # un jour est complet avec au moins 18 heures valides
 BANDES_DISTANCE_KM = [0.5, 1.0, 1.5]
+
+
+def dossier_donnees(echantillon: bool = False) -> Path:
+    """`data/` pour le volume complet, `data/echantillon/` pour le mode échantillon (jamais mélangés)."""
+    return DONNEES / "echantillon" if echantillon else DONNEES
