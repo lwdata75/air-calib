@@ -6,6 +6,7 @@ Le notebook 03 a comparé les modèles sur 20 % des stations et choisi les régl
 mêmes calculs sur toutes les stations, pour obtenir les chiffres définitifs. Pour chaque modèle :
   - les prédictions hors pli sont sauvegardées dans data/predictions/<modele>.parquet ;
   - une ligne est ajoutée au journal reports/runs.csv.
+Le modèle retenu (5_lightgbm_combine) combine les modèles 2 et 4 selon que le capteur a des voisins ou non.
 Le tableau de résultats (reports/resultats.csv) et l'importance des variables (reports/importance.csv)
 alimentent le notebook 04 et le README.
 """
@@ -21,8 +22,9 @@ from aircalib.metriques import resume
 from aircalib.variables import FAMILLES, VARIABLES
 
 # Le notebook 03 a comparé, sur 20 % des stations, les réglages par défaut de LightGBM à deux réglages
-# manuels : aucun n'a fait clairement mieux (1 à 2 paires d'écart sur 60). On garde donc les réglages par
-# défaut, les plus simples. Le réglage 1 est refait ici sur toutes les stations, pour vérifier ce choix.
+# manuels : aucun n'a fait clairement mieux (quelques paires d'écart sur 60, et un RMSE un peu moins bon).
+# On garde donc les réglages par défaut, les plus simples. Le réglage 1 est refait ici sur toutes les
+# stations, pour vérifier ce choix.
 REGLAGE_1 = {"learning_rate": 0.05}
 ARBRES_REGLAGE_1 = 500
 SANS_VOISINS = [v for v in VARIABLES if v not in FAMILLES["voisins"]]
@@ -77,10 +79,10 @@ def principal(echantillon: bool) -> None:
     dossier = racine / "predictions"
     dossier.mkdir(parents=True, exist_ok=True)
     perimetre = "échantillon de test" if echantillon else "toutes les stations"
+    journal = racine / "runs.csv" if echantillon else P.RAPPORTS / "runs.csv"
     predictions = {}
     for nom, (entrainer, variables, reglages) in les_modeles().items():
         depart = time.time()
-        journal = racine / "runs.csv" if echantillon else P.RAPPORTS / "runs.csv"
         pred = M.evaluer(nom, perimetre, table, entrainer, variables, reglages, journal)
         pred.write_parquet(dossier / f"{nom}.parquet")
         predictions[nom] = pred
@@ -93,6 +95,11 @@ def principal(echantillon: bool) -> None:
             if not echantillon:
                 importance.write_csv(P.RAPPORTS / "importance.csv")
         print(f"{nom} : {time.time() - depart:.0f} s", flush=True)
+    nom = "5_lightgbm_combine"
+    pred = M.combiner(predictions["2_lightgbm"], predictions["4_lightgbm_sans_voisins"])
+    M.noter_essai(nom, perimetre, VARIABLES, {"sans voisins": "4_lightgbm_sans_voisins"}, pred, 0.0, journal)
+    pred.write_parquet(dossier / f"{nom}.parquet")
+    predictions[nom] = pred
     resultats = tableau_de_resultats(predictions)
     if not echantillon:
         resultats.write_csv(P.RAPPORTS / "resultats.csv")

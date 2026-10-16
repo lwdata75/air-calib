@@ -66,6 +66,12 @@ FENETRES_H = [3, 24]  # moyennes glissantes du PM brut, sur les heures passées 
 VOISINS_RAYON_KM = 3.0  # les voisins d'un capteur : les autres capteurs à 3 km ou moins
 VOISINS_MIN = 3  # on calcule une médiane seulement s'il y a au moins 3 voisins valides
 
+# Sondes d'humidité : un petit échantillon, seulement pour vérifier si on peut s'en servir.
+SONDES_TYPES = ["dht22", "bme280"]
+SONDES_PAR_TYPE = 100
+SONDES_MOIS = date(2025, 1, 1)
+SATURATION_PCT = 99.9  # une humidité de 99,9 % ou plus est dite saturée
+
 # --- Évaluation ---------------------------------------------------------------------------------
 N_PLIS = 5
 GRAINE = 42

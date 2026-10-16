@@ -59,6 +59,21 @@ def principal(echantillon: bool) -> None:
     heures = pl.concat([h for h, _ in resultats if h is not None])
     comptes = pl.DataFrame([c for _, c in resultats]).fill_null(0).sum()
 
+    # Les capteurs voisins passent par les mêmes règles ; on ne garde que leur PM2.5 horaire.
+    voisins = pl.read_parquet(brut / "voisins.parquet")
+    print(f"Capteurs voisins : {voisins.height} à nettoyer…", flush=True)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        resultats_voisins = list(pool.map(lambda v: nettoyer_capteur(brut, v), voisins.iter_rows(named=True)))
+    heures_voisins = [h for h, _ in resultats_voisins if h is not None]
+    pm25_horaire = pl.concat([heures, *heures_voisins]).select("capteur", "heure", "pm25")
+    pm25_horaire.write_parquet(propre / "pm25_horaire.parquet")
+    pl.concat(
+        [
+            paires.select("capteur", "lat", "lon").with_columns(role=pl.lit("apparié")),
+            voisins.select("capteur", "lat", "lon").with_columns(role=pl.lit("voisin")),
+        ]
+    ).write_parquet(propre / "positions.parquet")
+
     print("Référence EEA (heure UTC = Start − 1 h) et météo DWD…", flush=True)
     eea = pl.concat([pl.read_parquet(f) for f in sorted((brut / "eea").glob("*.parquet"))])
     reference = N.nettoyer_reference(eea)
@@ -124,6 +139,11 @@ def principal(echantillon: bool) -> None:
             "etape": "capteurs déplacés de plus de 1 km",
             "unite": "capteurs",
             "nombre": c.get("capteur déplacé de plus de 1 km", 0),
+        },
+        {
+            "etape": "capteurs voisins avec des heures complètes",
+            "unite": "capteurs",
+            "nombre": len(heures_voisins),
         },
         {"etape": "paires saines", "unite": "paires", "nombre": int(controles["paire_saine"].sum())},
         {"etape": "paires défectueuses", "unite": "paires", "nombre": int((~controles["paire_saine"]).sum())},

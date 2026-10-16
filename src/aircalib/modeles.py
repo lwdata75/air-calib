@@ -19,7 +19,6 @@ from sklearn.linear_model import LinearRegression
 
 from aircalib import parametres as P
 from aircalib.metriques import resume
-from aircalib.variables import CATEGORIES
 
 Predire = Callable[[pl.DataFrame], np.ndarray]
 
@@ -53,15 +52,8 @@ def importer_lightgbm():
 
 
 def matrice(table: pl.DataFrame, variables: list[str]) -> np.ndarray:
-    """Les variables en tableau numpy ; les catégories deviennent des codes, les manquants restent NaN."""
-    colonnes = []
-    for v in variables:
-        if v in CATEGORIES:
-            codes = {nom: float(i) for i, nom in enumerate(CATEGORIES[v])}
-            colonnes.append(pl.col(v).replace_strict(codes, default=None, return_dtype=pl.Float64))
-        else:
-            colonnes.append(pl.col(v).cast(pl.Float64))
-    return table.select(colonnes).to_numpy()
+    """Les variables en tableau numpy (les manquants restent NaN, LightGBM sait les gérer)."""
+    return table.select(pl.col(variables).cast(pl.Float64)).to_numpy()
 
 
 # --- Les modèles --------------------------------------------------------------------------------
@@ -87,14 +79,9 @@ def lightgbm(
     """LightGBM sur les variables choisies ; sans `reglages`, les valeurs par défaut de la bibliothèque."""
     lgb = importer_lightgbm()
     parametres = {"objective": "regression", "verbose": -1, "seed": P.GRAINE, **(reglages or {})}
-    categories = [i for i, v in enumerate(variables) if v in CATEGORIES]
 
     def entrainer(apprentissage: pl.DataFrame) -> Predire:
-        donnees = lgb.Dataset(
-            matrice(apprentissage, variables),
-            apprentissage["reference"].to_numpy(),
-            categorical_feature=categories,
-        )
+        donnees = lgb.Dataset(matrice(apprentissage, variables), apprentissage["reference"].to_numpy())
         booster = lgb.train(parametres, donnees, num_boost_round=arbres)
         entrainer.importance = dict(zip(variables, booster.feature_importance("gain"), strict=True))
         return lambda table: booster.predict(matrice(table, variables))
@@ -128,6 +115,24 @@ def validation_croisee(table: pl.DataFrame, entrainer: Callable[[pl.DataFrame], 
             v: g / total for v, g in sorted(moyenne.items(), key=lambda x: -x[1])
         }
     return predictions
+
+
+def combiner(avec_voisins: pl.DataFrame, sans_voisins: pl.DataFrame) -> pl.DataFrame:
+    """Le modèle retenu : LightGBM complet quand le capteur a des voisins, sinon LightGBM sans voisins.
+
+    Le notebook 03 a montré que, pour les heures sans voisins, le modèle appris sans ces variables fait
+    mieux. On sait à l'avance si une heure a des voisins : le choix n'utilise jamais la référence.
+    """
+    autre = sans_voisins.select("capteur", "heure", prediction_sans="prediction")
+    return (
+        avec_voisins.join(autre, on=["capteur", "heure"])
+        .with_columns(
+            prediction=pl.when(pl.col("a_des_voisins"))
+            .then(pl.col("prediction"))
+            .otherwise(pl.col("prediction_sans"))
+        )
+        .drop("prediction_sans")
+    )
 
 
 COLONNES_GARDEES = [

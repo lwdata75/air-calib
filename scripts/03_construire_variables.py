@@ -2,8 +2,9 @@
 
     python scripts/03_construire_variables.py [--echantillon]
 
-Entrée : data/propre/heures_paires.parquet. Sortie : data/variables/table.parquet (une ligne par
-heure-paire : les 15 variables, la cible `reference`, le pli de la station, `paire_saine`).
+Entrées : data/propre/heures_paires.parquet, et le PM2.5 horaire et la position de tous les capteurs
+(appariés et voisins) pour la médiane des voisins. Sortie : data/variables/table.parquet (une ligne par
+heure-paire : les 14 variables (17 colonnes), la cible `reference`, le pli de la station, `paire_saine`).
 """
 
 import argparse
@@ -20,8 +21,9 @@ def principal(echantillon: bool) -> None:
     depart = time.time()
     racine = P.dossier_donnees(echantillon)
     heures = pl.read_parquet(racine / "propre" / "heures_paires.parquet")
-    paires = pl.read_parquet(racine / "propre" / "paires.parquet")
-    table = construire(heures, paires)
+    mesures = pl.read_parquet(racine / "propre" / "pm25_horaire.parquet")
+    positions = pl.read_parquet(racine / "propre" / "positions.parquet")
+    table = construire(heures, mesures, positions)
     verifier_variables(table, VARIABLES)
     (racine / "variables").mkdir(parents=True, exist_ok=True)
     table.write_parquet(racine / "variables" / "table.parquet")

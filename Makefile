@@ -13,15 +13,16 @@ install:  ## crée l'environnement à partir de uv.lock
 requirements:  ## régénère requirements.txt depuis uv.lock
 	uv export --frozen --no-hashes --no-dev --format requirements-txt -o requirements.txt
 
-data:  ## téléchargement complet, nettoyage, variables (≈ 1 h)
+data:  ## téléchargement complet, nettoyage, variables (≈ 2 h, presque tout pour le téléchargement)
 	$(PY) scripts/01_telecharger.py
 	$(PY) scripts/02_nettoyer.py
 	$(PY) scripts/03_construire_variables.py
 
-sample:  ## la même chaîne sur 10 capteurs et un mois
+sample:  ## la même chaîne, entraînement compris, sur 10 capteurs et un mois (quelques minutes)
 	$(PY) scripts/01_telecharger.py --echantillon
 	$(PY) scripts/02_nettoyer.py --echantillon
 	$(PY) scripts/03_construire_variables.py --echantillon
+	$(PY) scripts/04_entrainer.py --echantillon
 
 train:  ## entraîne les modèles retenus sur toutes les stations (5 plis)
 	$(PY) scripts/04_entrainer.py
@@ -33,5 +34,5 @@ test:  ## tests unitaires (hors ligne)
 	uv run pytest -q
 
 lint:
-	uv run ruff check src scripts tests
-	uv run ruff format --check src scripts tests
+	uv run ruff check src scripts tests notebooks
+	uv run ruff format --check src scripts tests notebooks

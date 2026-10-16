@@ -7,18 +7,17 @@ from sklearn.model_selection import GroupKFold
 from aircalib import parametres as P
 from aircalib.geo import distance_km
 
-# 16 variables (19 colonnes : l'heure, le mois et le jour sont codés sur deux colonnes), par famille.
-# Le dictionnaire sert aussi pour l'ablation.
+# 14 variables (17 colonnes : l'heure, le mois et le jour sont codés sur deux colonnes), par famille.
+# Le dictionnaire sert aussi pour l'ablation. Rien sur la station (type, distance) : là où l'on veut
+# corriger un capteur, il n'y a pas de station (notebook 03).
 FAMILLES = {
     "capteur": ["pm25", "pm10", "rapport_pm25_pm10", "n_mesures"],
     "meteo": ["humidite", "temperature", "point_de_rosee"],
     "temps": ["heure_sin", "heure_cos", "mois_sin", "mois_cos", "jour_sin", "jour_cos"],
     "passe": ["pm25_moy_3h", "pm25_moy_24h"],
     "voisins": ["mediane_voisins", "ecart_voisins"],
-    "contexte": ["type_station", "distance_km"],
 }
 VARIABLES = [v for liste in FAMILLES.values() for v in liste]
-CATEGORIES = {"type_station": ["background", "industrial", "traffic"]}
 
 
 def point_de_rosee(temperature: pl.Expr, humidite: pl.Expr) -> pl.Expr:
@@ -63,24 +62,24 @@ def moyennes_passees(table: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def mediane_des_voisins(table: pl.DataFrame, paires: pl.DataFrame) -> pl.DataFrame:
+def mediane_des_voisins(table: pl.DataFrame, mesures: pl.DataFrame, positions: pl.DataFrame) -> pl.DataFrame:
     """Médiane du PM2.5 des autres capteurs à 3 km ou moins, à la même heure (s'ils sont au moins 3).
 
-    Les voisins mesurent le même air, avec le même type de capteur : c'est une information que la station
-    ne donne pas. On ne regarde jamais la référence.
+    `mesures` donne le PM2.5 horaire de tous les capteurs disponibles (capteur, heure, pm25) et `positions`
+    leur position. Les voisins mesurent le même air, avec le même type de capteur : c'est une information
+    que la station ne donne pas. On ne regarde jamais la référence.
     """
-    positions = paires.select("capteur", "lat", "lon")
+    apparies = table.select("capteur").unique().join(positions, on="capteur")
     liens = (
-        positions.join(positions.rename({"capteur": "voisin", "lat": "lat_v", "lon": "lon_v"}), how="cross")
+        apparies.join(positions.select(voisin="capteur", lat_v="lat", lon_v="lon"), how="cross")
         .filter(pl.col("capteur") != pl.col("voisin"))
         .filter(
             distance_km(pl.col("lat"), pl.col("lon"), pl.col("lat_v"), pl.col("lon_v")) <= P.VOISINS_RAYON_KM
         )
         .select("capteur", "voisin")
     )
-    mesures_voisins = table.select(voisin="capteur", heure="heure", pm25_voisin="pm25")
     mediane = (
-        liens.join(mesures_voisins, on="voisin")
+        liens.join(mesures.select(voisin="capteur", heure="heure", pm25_voisin="pm25"), on="voisin")
         .group_by("capteur", "heure")
         .agg(mediane_voisins=pl.col("pm25_voisin").median(), n_voisins=pl.len())
         .filter(pl.col("n_voisins") >= P.VOISINS_MIN)
@@ -106,7 +105,7 @@ def plis_par_station(table: pl.DataFrame) -> pl.DataFrame:
     return table.join(stations.select("station").with_columns(pli=pl.Series(plis)), on="station")
 
 
-def construire(heures: pl.DataFrame, paires: pl.DataFrame) -> pl.DataFrame:
+def construire(heures: pl.DataFrame, mesures: pl.DataFrame, positions: pl.DataFrame) -> pl.DataFrame:
     """Toutes les variables, la cible (`reference`) et le pli de chaque heure-paire."""
     table = heures.with_columns(
         variables_du_temps(pl.col("heure")),
@@ -114,5 +113,5 @@ def construire(heures: pl.DataFrame, paires: pl.DataFrame) -> pl.DataFrame:
         point_de_rosee=point_de_rosee(pl.col("temperature"), pl.col("humidite").clip(lower_bound=1)),
     )
     table = moyennes_passees(table)
-    table = mediane_des_voisins(table, paires)
+    table = mediane_des_voisins(table, mesures, positions)
     return plis_par_station(table).with_columns(a_des_voisins=pl.col("mediane_voisins").is_not_null())

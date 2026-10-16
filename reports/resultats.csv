@@ -1,36 +1,43 @@
 modele,paires,tranche,heures,rmse,mae,r2_global,pente_globale,paires_notees,r2_median_par_paire,pente_mediane_par_paire,pct_epa_horaire,pct_epa_journalier
 0_capteur_brut,toutes,toutes heures,5410631,36.13,8.154,0.011,0.502,522,0.616,0.562,20.307,33.267
 0_capteur_brut,saines,toutes heures,4401479,12.417,5.164,0.141,0.621,419,0.687,0.621,25.298,40.931
-0_capteur_brut,saines,avec voisins,2713759,14.731,5.497,0.109,0.641,300,0.705,0.617,27.333,40.418
-0_capteur_brut,saines,sans voisins,1687720,7.29,4.628,0.372,0.579,209,0.646,0.63,22.967,41.935
+0_capteur_brut,saines,avec voisins,3539222,13.381,5.288,0.125,0.632,357,0.694,0.621,26.611,40.0
+0_capteur_brut,saines,sans voisins,862257,7.216,4.653,0.396,0.57,108,0.605,0.624,22.222,43.182
 0_capteur_brut,saines,"bande 0-0,5 km",1113971,8.804,4.771,0.297,0.648,105,0.708,0.63,27.619,39.216
 0_capteur_brut,saines,"bande 0,5-1 km",1481963,17.557,5.583,0.062,0.573,142,0.684,0.585,26.761,40.0
 0_capteur_brut,saines,"bande 1-1,5 km",1805545,8.662,5.062,0.291,0.644,172,0.672,0.635,22.674,42.771
 1_regression_lineaire,toutes,toutes heures,5410631,10.202,5.125,0.025,0.163,522,0.327,0.172,0.0,0.0
 1_regression_lineaire,saines,toutes heures,4401479,7.05,4.518,0.153,0.188,419,0.376,0.192,0.0,0.0
-1_regression_lineaire,saines,avec voisins,2713759,7.389,4.566,0.124,0.194,300,0.392,0.188,0.0,0.0
-1_regression_lineaire,saines,sans voisins,1687720,6.468,4.441,0.288,0.178,209,0.334,0.193,0.0,0.0
+1_regression_lineaire,saines,avec voisins,3539222,7.166,4.517,0.14,0.191,357,0.389,0.192,0.0,0.0
+1_regression_lineaire,saines,sans voisins,862257,6.556,4.522,0.294,0.176,108,0.323,0.181,0.0,0.0
 1_regression_lineaire,saines,"bande 0-0,5 km",1113971,6.602,4.426,0.277,0.193,105,0.372,0.188,0.0,0.0
 1_regression_lineaire,saines,"bande 0,5-1 km",1481963,7.886,4.634,0.074,0.175,142,0.366,0.193,0.0,0.0
 1_regression_lineaire,saines,"bande 1-1,5 km",1805545,6.576,4.48,0.272,0.196,172,0.387,0.193,0.0,0.0
-2_lightgbm,toutes,toutes heures,5410631,5.01,2.932,0.594,0.691,522,0.8,0.748,56.705,71.287
-2_lightgbm,saines,toutes heures,4401479,4.201,2.599,0.698,0.728,419,0.819,0.776,64.2,77.696
-2_lightgbm,saines,avec voisins,2713759,3.654,2.322,0.777,0.805,300,0.85,0.822,79.0,90.244
-2_lightgbm,saines,sans voisins,1687720,4.954,3.046,0.559,0.592,209,0.757,0.636,36.842,52.688
-2_lightgbm,saines,"bande 0-0,5 km",1113971,3.833,2.412,0.751,0.794,105,0.846,0.812,69.524,81.373
-2_lightgbm,saines,"bande 0,5-1 km",1481963,4.366,2.672,0.675,0.689,142,0.816,0.777,61.972,77.857
-2_lightgbm,saines,"bande 1-1,5 km",1805545,4.279,2.655,0.685,0.718,172,0.813,0.759,62.791,75.301
-3_lightgbm_reglage_1,toutes,toutes heures,5410631,5.118,2.991,0.589,0.718,522,0.81,0.771,59.579,71.287
-3_lightgbm_reglage_1,saines,toutes heures,4401479,4.247,2.638,0.695,0.753,419,0.828,0.8,66.826,77.696
-3_lightgbm_reglage_1,saines,avec voisins,2713759,3.686,2.357,0.776,0.825,300,0.858,0.837,80.667,89.547
-3_lightgbm_reglage_1,saines,sans voisins,1687720,5.019,3.09,0.555,0.627,209,0.767,0.673,41.148,54.301
-3_lightgbm_reglage_1,saines,"bande 0-0,5 km",1113971,3.92,2.453,0.746,0.823,105,0.85,0.825,72.381,81.373
-3_lightgbm_reglage_1,saines,"bande 0,5-1 km",1481963,4.421,2.734,0.67,0.716,142,0.823,0.804,64.789,76.429
-3_lightgbm_reglage_1,saines,"bande 1-1,5 km",1805545,4.294,2.673,0.685,0.741,172,0.826,0.794,65.116,76.506
-4_lightgbm_sans_voisins,toutes,toutes heures,5410631,5.867,3.511,0.467,0.612,522,0.756,0.655,40.805,53.663
-4_lightgbm_sans_voisins,saines,toutes heures,4401479,5.044,3.112,0.575,0.654,419,0.793,0.691,48.926,61.52
-4_lightgbm_sans_voisins,saines,avec voisins,2713759,5.081,3.13,0.583,0.674,300,0.802,0.695,52.333,64.111
-4_lightgbm_sans_voisins,saines,sans voisins,1687720,4.984,3.083,0.56,0.619,209,0.772,0.666,43.541,54.839
-4_lightgbm_sans_voisins,saines,"bande 0-0,5 km",1113971,4.742,2.973,0.628,0.711,105,0.81,0.731,47.619,61.765
-4_lightgbm_sans_voisins,saines,"bande 0,5-1 km",1481963,5.34,3.204,0.529,0.619,142,0.798,0.674,52.113,62.143
-4_lightgbm_sans_voisins,saines,"bande 1-1,5 km",1805545,4.973,3.122,0.581,0.649,172,0.783,0.688,47.093,60.843
+2_lightgbm,toutes,toutes heures,5410631,4.446,2.564,0.671,0.729,522,0.835,0.779,69.157,80.198
+2_lightgbm,saines,toutes heures,4401479,3.79,2.317,0.753,0.758,419,0.85,0.795,73.986,84.804
+2_lightgbm,saines,avec voisins,3539222,3.449,2.14,0.796,0.803,357,0.867,0.824,83.473,91.594
+2_lightgbm,saines,sans voisins,862257,4.951,3.044,0.57,0.571,108,0.734,0.617,34.259,54.545
+2_lightgbm,saines,"bande 0-0,5 km",1113971,3.448,2.147,0.796,0.793,105,0.866,0.794,80.0,86.275
+2_lightgbm,saines,"bande 0,5-1 km",1481963,3.984,2.413,0.729,0.726,142,0.844,0.786,71.831,83.571
+2_lightgbm,saines,"bande 1-1,5 km",1805545,3.828,2.343,0.747,0.764,172,0.844,0.806,72.093,84.94
+3_lightgbm_reglage_1,toutes,toutes heures,5410631,4.37,2.521,0.683,0.744,522,0.841,0.797,70.881,82.178
+3_lightgbm_reglage_1,saines,toutes heures,4401479,3.73,2.282,0.761,0.773,419,0.855,0.813,75.656,86.52
+3_lightgbm_reglage_1,saines,avec voisins,3539222,3.389,2.11,0.803,0.815,357,0.873,0.837,84.874,93.043
+3_lightgbm_reglage_1,saines,sans voisins,862257,4.889,2.987,0.581,0.592,108,0.746,0.65,38.889,56.818
+3_lightgbm_reglage_1,saines,"bande 0-0,5 km",1113971,3.399,2.121,0.802,0.805,105,0.876,0.808,80.0,86.275
+3_lightgbm_reglage_1,saines,"bande 0,5-1 km",1481963,3.911,2.372,0.739,0.741,142,0.851,0.805,74.648,86.429
+3_lightgbm_reglage_1,saines,"bande 1-1,5 km",1805545,3.774,2.307,0.754,0.778,172,0.851,0.817,73.837,86.747
+4_lightgbm_sans_voisins,toutes,toutes heures,5410631,5.331,3.233,0.53,0.6,522,0.755,0.64,41.379,56.436
+4_lightgbm_sans_voisins,saines,toutes heures,4401479,4.698,2.907,0.621,0.642,419,0.792,0.676,49.642,65.441
+4_lightgbm_sans_voisins,saines,avec voisins,3539222,4.681,2.901,0.626,0.652,357,0.797,0.681,51.261,65.217
+4_lightgbm_sans_voisins,saines,sans voisins,862257,4.769,2.933,0.601,0.597,108,0.763,0.653,44.444,62.5
+4_lightgbm_sans_voisins,saines,"bande 0-0,5 km",1113971,4.346,2.718,0.676,0.679,105,0.806,0.694,50.476,64.706
+4_lightgbm_sans_voisins,saines,"bande 0,5-1 km",1481963,5.009,3.062,0.573,0.607,142,0.796,0.666,50.0,65.714
+4_lightgbm_sans_voisins,saines,"bande 1-1,5 km",1805545,4.643,2.898,0.628,0.647,172,0.787,0.679,48.837,65.663
+5_lightgbm_combine,toutes,toutes heures,5410631,4.15,2.468,0.71,0.738,522,0.838,0.784,70.881,81.782
+5_lightgbm_combine,saines,toutes heures,4401479,3.744,2.295,0.759,0.763,419,0.851,0.803,75.656,86.52
+5_lightgbm_combine,saines,avec voisins,3539222,3.449,2.14,0.796,0.803,357,0.867,0.824,83.473,91.594
+5_lightgbm_combine,saines,sans voisins,862257,4.769,2.933,0.601,0.597,108,0.763,0.653,44.444,62.5
+5_lightgbm_combine,saines,"bande 0-0,5 km",1113971,3.411,2.126,0.8,0.797,105,0.865,0.798,80.0,88.235
+5_lightgbm_combine,saines,"bande 0,5-1 km",1481963,3.923,2.388,0.737,0.732,142,0.845,0.786,74.648,86.429
+5_lightgbm_combine,saines,"bande 1-1,5 km",1805545,3.79,2.324,0.752,0.768,172,0.848,0.811,73.837,85.542

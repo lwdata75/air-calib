@@ -116,6 +116,34 @@ async def telecharger_capteur(client, dossier: Path, capteur: int, debut: date, 
     return trouves
 
 
+async def telecharger_sondes(client, dossier: Path, live: pl.DataFrame, par_type: int) -> None:
+    """Un mois (janvier 2025) de sondes d'humidité actives en Allemagne, tirées au hasard."""
+    debut = P.SONDES_MOIS
+    jours = [debut + timedelta(days=i) for i in range(31)]
+    sondes = (
+        live.filter(pl.col("pays") == P.PAYS, pl.col("type").is_in(P.SONDES_TYPES), ~pl.col("interieur"))
+        .drop_nulls(["lat", "lon"])
+        .sort("capteur")
+        .group_by("type", maintain_order=True)
+        .map_groups(lambda g: g.sample(n=min(par_type, g.height), seed=P.GRAINE))
+    )
+    for sonde, type_sonde, lat, lon in sondes.select("capteur", "type", "lat", "lon").iter_rows():
+        fichier = dossier / f"{sonde}.parquet"
+        if fichier.exists():
+            continue
+        reponses = await asyncio.gather(
+            *(T.recuperer(client, T.url_fichier(sonde, j, type_sonde)) for j in jours)
+        )
+        tables = [T.lire_sonde_jour(r.content) for r in reponses if r.status_code == 200]
+        tables = [t for t in tables if t.height]
+        dossier.mkdir(parents=True, exist_ok=True)
+        if tables:
+            pl.concat(tables).with_columns(
+                capteur=pl.lit(sonde), type=pl.lit(type_sonde), lat=pl.lit(lat), lon=pl.lit(lon)
+            ).write_parquet(fichier)
+    print(f"   {len(list(dossier.glob('*.parquet')))} sondes avec des mesures", flush=True)
+
+
 async def principal(echantillon: bool) -> None:
     racine = P.dossier_donnees(echantillon) / "brut"
     racine.mkdir(parents=True, exist_ok=True)
@@ -204,7 +232,38 @@ async def principal(echantillon: bool) -> None:
         paires.write_parquet(racine / "paires.parquet")
         print(f"   {paires.height} paires, {paires['station'].n_unique()} stations", flush=True)
 
-        print("6. Mesures des capteurs, jour par jour…", flush=True)
+        print("6. Capteurs voisins (à 3 km ou moins d'un capteur apparié, sans station à eux)…", flush=True)
+        # Ils ne servent qu'à calculer la médiane des voisins : on ne les compare jamais à une station.
+        autres = capteurs.join(positions, on="capteur").join(
+            paires.select("capteur"), on="capteur", how="anti"
+        )
+        voisins = (
+            paires.select("capteur", lat_p="lat", lon_p="lon")
+            .join(autres, how="cross", suffix="_v")
+            .filter(
+                distance_km(pl.col("lat_p"), pl.col("lon_p"), pl.col("lat"), pl.col("lon"))
+                <= P.VOISINS_RAYON_KM
+            )
+            .select(
+                capteur="capteur_v",
+                premier_jour="premier_jour",
+                dernier_jour="dernier_jour",
+                lat="lat",
+                lon="lon",
+            )
+            .unique("capteur")
+            .sort("capteur")
+        )
+        voisins.write_parquet(racine / "voisins.parquet")
+        print(f"   {voisins.height} capteurs voisins", flush=True)
+
+        print("7. Mesures des capteurs (appariés puis voisins), jour par jour…", flush=True)
+        a_telecharger = pl.concat(
+            [
+                paires.select("capteur", "premier_jour", "dernier_jour"),
+                voisins.select("capteur", "premier_jour", "dernier_jour"),
+            ]
+        )
         limite = asyncio.Semaphore(4)  # 4 capteurs à la fois (leurs requêtes partagent le robinet de 8)
         faits = 0
 
@@ -221,20 +280,15 @@ async def principal(echantillon: bool) -> None:
             async with limite:
                 n = await telecharger_capteur(client, racine / "capteurs", capteur, debut, fin)
             faits += 1
-            if faits % 25 == 0 or faits == paires.height:
+            if faits % 50 == 0 or faits == a_telecharger.height:
                 minutes = (time.time() - depart) / 60
-                print(f"   {faits}/{paires.height} capteurs ({minutes:.0f} min)", flush=True)
+                print(f"   {faits}/{a_telecharger.height} capteurs ({minutes:.0f} min)", flush=True)
             return n
 
-        jours = await asyncio.gather(
-            *(
-                un_capteur(c, p, d)
-                for c, p, d in paires.select("capteur", "premier_jour", "dernier_jour").iter_rows()
-            )
-        )
+        jours = await asyncio.gather(*(un_capteur(c, p, d) for c, p, d in a_telecharger.iter_rows()))
         print(f"   {sum(jours)} nouveaux fichiers jour", flush=True)
 
-        print("7. Météo officielle du DWD…", flush=True)
+        print("8. Météo officielle du DWD…", flush=True)
         for id_dwd, nom_fichier in paires.select("id_dwd", "fichier").unique().iter_rows():
             fichier = racine / "dwd" / f"{id_dwd}.parquet"
             if fichier.exists():
@@ -244,6 +298,12 @@ async def principal(echantillon: bool) -> None:
             fichier.parent.mkdir(parents=True, exist_ok=True)
             T.lire_dwd(reponse.content).write_parquet(fichier)
         print(f"   {paires['id_dwd'].n_unique()} stations météo", flush=True)
+
+        print(
+            "9. Un échantillon de sondes d'humidité (DHT22, BME280), pour vérifier si on peut s'en servir…",
+            flush=True,
+        )
+        await telecharger_sondes(client, racine / "sondes", live, 10 if echantillon else P.SONDES_PAR_TYPE)
 
     print(f"Terminé en {(time.time() - depart) / 60:.1f} min.")
 

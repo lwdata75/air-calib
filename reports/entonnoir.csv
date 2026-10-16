@@ -15,5 +15,6 @@ heures-paires gardées,heures,5410631
   dont paires saines,heures,4401479
 capteurs sans aucune mesure,capteurs,0
 capteurs déplacés de plus de 1 km,capteurs,12
+capteurs voisins avec des heures complètes,capteurs,791
 paires saines,paires,419
 paires défectueuses,paires,122

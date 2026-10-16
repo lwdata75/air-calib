@@ -74,10 +74,10 @@ def url_jour(jour: date) -> str:
     return f"{P.ARCHIVE_SC}/{jour.isoformat()}/"
 
 
-def url_fichier(capteur: int, jour: date) -> str:
-    """Fichier d'un capteur SDS011 pour un jour (compressé en gzip pour les années passées)."""
+def url_fichier(capteur: int, jour: date, type_capteur: str = P.TYPE_CAPTEUR) -> str:
+    """Fichier d'un capteur pour un jour (compressé en gzip pour les années passées)."""
     gz = ".gz" if jour.year < date.today().year else ""
-    return f"{url_jour(jour)}{jour.isoformat()}_{P.TYPE_CAPTEUR}_sensor_{capteur}.csv{gz}"
+    return f"{url_jour(jour)}{jour.isoformat()}_{type_capteur}_sensor_{capteur}.csv{gz}"
 
 
 async def lister_jour(client: httpx.AsyncClient, jour: date) -> pl.DataFrame:
@@ -143,15 +143,44 @@ def lire_fichier_jour(contenu: bytes, compresse: bool) -> pl.DataFrame:
 
 
 async def instantane_live(client: httpx.AsyncClient) -> pl.DataFrame:
-    """Pays actuel de chaque capteur actif (sert seulement à ne pas lire les capteurs étrangers)."""
+    """Capteurs actifs en ce moment : pays, type et position (sert à ne pas lire les capteurs étrangers)."""
     reponse = await recuperer(client, P.INSTANTANE_SC)
     reponse.raise_for_status()
-    lignes = [
-        {"capteur": m["sensor"]["id"], "pays": m["location"].get("country")}
-        for m in reponse.json()
-        if m.get("sensor") and m.get("location")
-    ]
-    return pl.DataFrame(lignes).unique("capteur")
+    lignes = []
+    for m in reponse.json():
+        lieu, capteur = m.get("location") or {}, m.get("sensor") or {}
+        try:
+            lat, lon = float(lieu["latitude"]), float(lieu["longitude"])
+        except (KeyError, TypeError, ValueError):
+            lat = lon = None
+        lignes.append(
+            {
+                "capteur": capteur.get("id"),
+                "type": (capteur.get("sensor_type") or {}).get("name", "").lower(),
+                "pays": lieu.get("country"),
+                "interieur": bool(lieu.get("indoor")),
+                "lat": lat,
+                "lon": lon,
+            }
+        )
+    return pl.DataFrame(lignes).drop_nulls("capteur").unique("capteur")
+
+
+def lire_sonde_jour(contenu: bytes) -> pl.DataFrame:
+    """Humidité et température d'un fichier jour de sonde météo (DHT22, BME280…)."""
+    table = pl.read_csv(io.BytesIO(zlib.decompress(contenu, wbits=31)), separator=";", infer_schema=False)
+    if "humidity" not in table.columns:
+        return pl.DataFrame()
+
+    def nombre(col: str) -> pl.Expr:
+        return (
+            pl.col(col).str.strip_chars().str.replace(",", ".", literal=True).cast(pl.Float64, strict=False)
+        )
+
+    return table.select(
+        horodatage=pl.col("timestamp").str.to_datetime("%Y-%m-%dT%H:%M:%S", strict=False),
+        humidite=nombre("humidity"),
+    )
 
 
 # --- EEA ------------------------------------------------------------------------------------------
