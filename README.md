@@ -126,7 +126,7 @@ VS Code ou Jupyter, installez-le avec `brew install libomp`.
 git clone -b version-simple https://github.com/lwdata75/air-calib.git && cd air-calib
 make install     # uv sync --frozen
 make test        # 12 tests, hors ligne (≈ 1 s)
-make sample      # toute la chaîne sur 10 capteurs et un mois, entraînement compris (quelques minutes)
+make sample      # toute la chaîne sur 10 capteurs et un mois, entraînement compris (≈ 1 min)
 make data        # volume complet : ≈ 2 h, presque tout pour le téléchargement
 make train       # les modèles sur toutes les stations (≈ 1 min)
 make notebooks   # réexécute les notebooks 01 à 04 (≈ 30 s)
