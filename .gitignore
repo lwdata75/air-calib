@@ -1,14 +1,12 @@
-# Data is rebuilt by the pipeline, never versioned
+# Les données sont reconstruites par les scripts : jamais versionnées
 data/
-mlruns/
-mlflow.db
 *.parquet
-*.csv
-!reports/results/*.csv
-*.csv.gz
 *.zip
+*.csv.gz
+*.csv
+!reports/*.csv
 
-# Python / tooling
+# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -16,10 +14,8 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 *.egg-info/
-dist/
-build/
 
-# OS / editors
+# Système
 .DS_Store
-.idea/
 .vscode/
+.idea/

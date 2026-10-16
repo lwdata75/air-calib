@@ -1,48 +1,30 @@
-.PHONY: help setup requirements data sample train evaluate test lint format notebooks mlflow clean
+# Les commandes du projet. « make sample » teste toute la chaîne en quelques minutes.
+PY := uv run python
 
-RUN := uv run
+.PHONY: install requirements data sample train test lint
 
-help:  ## List targets
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
-
-setup:  ## Create the virtualenv from the lockfile
+install:  ## crée l'environnement à partir de uv.lock
 	uv sync --frozen
 
-requirements:  ## Regenerate requirements.txt from uv.lock (never edit it by hand)
+requirements:  ## régénère requirements.txt depuis uv.lock
 	uv export --frozen --no-hashes --no-dev --format requirements-txt -o requirements.txt
 
-data:  ## Run every implemented pipeline stage on the full period
-	$(RUN) python -m aircalib all
+data:  ## téléchargement complet, nettoyage, variables (≈ 1 h)
+	$(PY) scripts/01_telecharger.py
+	$(PY) scripts/02_nettoyer.py
+	$(PY) scripts/03_construire_variables.py
 
-sample:  ## Fast end-to-end run on a small subset
-	$(RUN) python -m aircalib all --sample
+sample:  ## la même chaîne sur 10 capteurs et un mois
+	$(PY) scripts/01_telecharger.py --echantillon
+	$(PY) scripts/02_nettoyer.py --echantillon
+	$(PY) scripts/03_construire_variables.py --echantillon
 
-train:  ## Step 6: model ladder, side studies on the subsample, final model (MLflow, about 1 h 30)
-	for study in ladder ablation scale monotone unverifiable x optuna recalibration final attribution; do \
-		$(RUN) python -m aircalib train --study $$study || exit 1; \
-	done
+train:  ## entraîne les modèles retenus sur toutes les stations (5 plis)
+	$(PY) scripts/04_entrainer.py
 
-evaluate:  ## Step 7: time, distance, France, breakdowns, conformal interval (needs `make train`, about 30 min)
-	for study in temporal distance france breakdowns conformal; do \
-		$(RUN) python -m aircalib train --study $$study || exit 1; \
-	done
+test:  ## tests unitaires (hors ligne)
+	uv run pytest -q
 
-test:  ## Unit tests (offline)
-	$(RUN) pytest -m "not network"
-
-lint:  ## Lint + format check
-	$(RUN) ruff check src tests notebooks
-	$(RUN) ruff format --check src tests notebooks
-
-format:  ## Auto-fix lint and format
-	$(RUN) ruff check --fix src tests notebooks
-	$(RUN) ruff format src tests notebooks
-
-notebooks:  ## Re-execute every notebook in place
-	$(RUN) jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
-
-mlflow:  ## Local MLflow UI (runs of step 6)
-	$(RUN) mlflow ui --backend-store-uri sqlite:///mlflow.db
-
-clean:  ## Remove caches (keeps data/)
-	rm -rf .pytest_cache .ruff_cache **/__pycache__
+lint:
+	uv run ruff check src scripts tests
+	uv run ruff format --check src scripts tests

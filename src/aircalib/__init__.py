@@ -1,3 +1,1 @@
-"""aircalib: calibrate low-cost PM sensors (Sensor.Community) against EEA reference stations."""
-
-__version__ = "0.1.0"
+"""Corriger un capteur de particules SDS011 à partir des stations officielles (version simplifiée)."""
