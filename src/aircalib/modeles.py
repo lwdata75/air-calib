@@ -92,15 +92,24 @@ def lightgbm(
 # --- Validation croisée par station ---------------------------------------------------------------
 
 
-def validation_croisee(table: pl.DataFrame, entrainer: Callable[[pl.DataFrame], Predire]) -> pl.DataFrame:
+def validation_croisee(
+    table: pl.DataFrame,
+    entrainer: Callable[[pl.DataFrame], Predire],
+    apprendre_sur: pl.Expr | None = None,
+    tester_sur: pl.Expr | None = None,
+) -> pl.DataFrame:
     """Prédictions « hors pli » : chaque station est prédite par le modèle appris sur les 4 autres plis.
 
     On n'apprend que sur les paires saines ; on prédit toutes les paires du pli (saines et défectueuses).
+    `apprendre_sur` et `tester_sur` restreignent en plus les heures (par exemple : apprendre sur 2024,
+    tester sur 2025, notebook 06).
     """
+    apprendre_sur = pl.lit(True) if apprendre_sur is None else apprendre_sur
+    tester_sur = pl.lit(True) if tester_sur is None else tester_sur
     morceaux, importances = [], []
     for pli in range(P.N_PLIS):
-        apprentissage = table.filter((pl.col("pli") != pli) & pl.col("paire_saine"))
-        test = table.filter(pl.col("pli") == pli)
+        apprentissage = table.filter((pl.col("pli") != pli) & pl.col("paire_saine") & apprendre_sur)
+        test = table.filter((pl.col("pli") == pli) & tester_sur)
         if apprentissage.is_empty() or test.is_empty():
             continue
         predire = entrainer(apprentissage)

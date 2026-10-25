@@ -32,3 +32,13 @@ def test_point_de_rosee():
     rosee = table.select(V.point_de_rosee(pl.col("t"), pl.col("rh")).alias("rosee"))["rosee"]
     assert rosee[0] == pytest.approx(20.0, abs=1e-6)  # air saturé : le point de rosée est la température
     assert rosee[1] == pytest.approx(9.3, abs=0.1)
+
+
+def test_deux_stations_proches_sont_dans_le_meme_pli():
+    # A et B à environ 5 km l'une de l'autre, C à 5 km de B (chaîne), D loin de tout.
+    stations = pl.DataFrame(
+        {"station": ["A", "B", "C", "D"], "lat": [48.0, 48.045, 48.09, 52.0], "lon": [11.0, 11.0, 11.0, 13.0]}
+    )
+    zones = V.regions(stations, rayon_km=6)
+    region = dict(zones.iter_rows())
+    assert region["A"] == region["B"] == region["C"] != region["D"]

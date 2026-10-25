@@ -5,6 +5,7 @@ prediction = pente × référence + ordonnée. Une paire « passe » si elle tie
 R² ≥ 0,70, pente entre 0,65 et 1,35, ordonnée entre −5 et +5 µg/m³, RMSE ≤ 7 µg/m³.
 """
 
+import numpy as np
 import polars as pl
 
 from aircalib import parametres as P
@@ -81,6 +82,41 @@ def resume(table: pl.DataFrame) -> dict[str, float]:
         "pct_epa_horaire": 100 * horaire["passe_epa"].mean() if horaire.height else float("nan"),
         "pct_epa_journalier": 100 * journalier["passe_epa"].mean() if journalier.height else float("nan"),
     }
+
+
+def tirages_par_station(
+    table: pl.DataFrame, tirages: int = P.TIRAGES_BOOTSTRAP, graine: int = P.GRAINE
+) -> pl.DataFrame:
+    """Bootstrap par station : on retire les stations au hasard (avec remise) et on recalcule le RMSE et le
+    % de paires EPA horaire, `tirages` fois. Renvoie un tableau d'une ligne par tirage.
+
+    On tire des stations, pas des heures : les heures d'une même station ne sont pas indépendantes, et tirer
+    des heures donnerait des intervalles beaucoup trop étroits. Avec la même graine, deux modèles évalués
+    sur les mêmes stations ont les mêmes tirages : on peut comparer leurs chiffres tirage par tirage.
+    """
+    par_paire = (
+        table.group_by("capteur")
+        .agg(pl.col("station").first(), n=pl.len(), erreur2=((Y - X) ** 2).sum())
+        .join(stats_regression(table, ["capteur"]).select("capteur", "passe_epa"), on="capteur")
+        .sort("capteur")
+    )
+    stations = par_paire["station"].unique().sort()
+    indice = par_paire.select(pl.col("station").replace_strict(stations, range(len(stations))))
+    indice = indice.to_series().to_numpy()
+    n, erreur2 = par_paire["n"].to_numpy(), par_paire["erreur2"].to_numpy()
+    notee = n >= P.HEURES_MIN_PAIRE
+    passe = par_paire["passe_epa"].to_numpy() & notee
+    rng = np.random.default_rng(graine)
+    lignes = []
+    for _ in range(tirages):
+        poids = np.bincount(rng.integers(len(stations), size=len(stations)), minlength=len(stations))[indice]
+        lignes.append(
+            {
+                "rmse": np.sqrt((poids * erreur2).sum() / (poids * n).sum()),
+                "pct_epa_horaire": 100 * (poids * passe).sum() / (poids * notee).sum(),
+            }
+        )
+    return pl.DataFrame(lignes)
 
 
 def resume_par(table: pl.DataFrame, colonne: str) -> pl.DataFrame:

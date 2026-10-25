@@ -22,6 +22,8 @@ proche d'une station pour être utile là où il n'y en a pas ?**
   39 % pour le capteur brut.
 - Mais il faut que le capteur ait des capteurs voisins : sans voisins, seulement 44 % des paires passent les cibles.
 - Et le modèle sous-estime encore les pics.
+- Enfin, il faut le réapprendre régulièrement : appris sur une seule année, il ne passe plus les cibles que pour
+  60 à 65 % des paires l'année suivante (notebook 06).
 
 Ces chiffres sont mesurés sur des capteurs à 1,5 km ou moins d'une station que le modèle n'a jamais vue. Pour un
 capteur vraiment loin de toute station, ils restent une estimation, pas une mesure.
@@ -42,7 +44,7 @@ Rien n'est versionné dans `data/` (2,9 Go une fois téléchargé). Licence du c
 flowchart TD
     A["01 télécharger<br/>capteurs, EEA, DWD"] --> B["02 nettoyer, apparier<br/>03 construire les variables"]
     B --> C["04 entraîner et évaluer<br/>5 plis par station"]
-    C --> D["notebooks 01 à 05"]
+    C --> D["notebooks 01 à 06"]
 ```
 
 1. **Télécharger** (`scripts/01_telecharger.py`) : les stations EEA, les capteurs à 1,5 km ou moins d'une station, leurs
@@ -58,7 +60,9 @@ Les notebooks racontent le chemin, dans l'ordre :
 - [03 — l'entraînement sur 20 % des stations](notebooks/03_entrainement.ipynb) ;
 - [04 — les résultats](notebooks/04_resultats.ipynb) ;
 - [05 — la contre-vérification](notebooks/05_contre_verification.ipynb) : les métriques recalculées à la main, sans
-  `src/`, pour vérifier qu'elles ne dépendent pas d'un bug.
+  `src/`, pour vérifier qu'elles ne dépendent pas d'un bug ;
+- [06 — la robustesse de l'évaluation](notebooks/06_robustesse.ipynb) : intervalles de confiance, plis par région
+  et validation dans le temps.
 
 Le [journal de bord](docs/JOURNAL.md) garde les problèmes rencontrés et nos décisions.
 
@@ -95,6 +99,13 @@ Le modèle combiné a été choisi sur l'échantillon de 20 % des stations, où 
 contre 4,75). Sur toutes les stations, les deux se valent. On garde le combiné : il a été choisi avant de voir ces
 chiffres, et il s'entraîne presque deux fois plus vite (17 s contre 30 s).
 
+**Quelle confiance accorder à ces chiffres ?** Le notebook 06 les met à l'épreuve, sur un nouveau téléchargement
+de l'archive (qui donne 75,2 % au lieu de 75,7 %) :
+- un bootstrap par station donne un intervalle à 95 % d'environ **68 à 82 %** de paires EPA en horaire. L'écart
+  entre le combiné et le réglage 1 contient zéro : les deux sont indistinguables ;
+- avec des plis par région (stations à 10 km ou moins dans le même pli), on perd environ 3 points ;
+- appris sur une année et testé sur l'autre, le modèle perd de 10 à 23 points.
+
 Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
 
 | Avec voisins (80 % des heures) | Sans voisins (20 %) | 0–0,5 km | 0,5–1 km | 1–1,5 km | Toutes paires, défectueuses comprises |
@@ -113,17 +124,18 @@ Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
 - Les pics restent sous-estimés (pente médiane 0,80) : c'est gênant pour un usage d'alerte.
 - Une heure sur cinq n'a pas de voisins, et la correction y est nettement moins bonne.
 - On repère les capteurs défectueux grâce à la station, ce qui est impossible là où il n'y en a pas.
-- La validation est faite par station, pas dans le temps : on n'a pas testé si un modèle appris en 2024 tient en 2025.
+- Le modèle ne tient pas bien d'une année à l'autre (notebook 06). Nos chiffres valent pour un modèle réappris
+  régulièrement. Une partie de l'écart vient sans doute de ce que, en validation par station, le modèle a déjà vu
+  les mêmes jours de pollution sur d'autres stations.
 - Les 20 % de stations qui ont servi à choisir le modèle font aussi partie de l'évaluation finale. Les chiffres sont
   donc un peu optimistes, mais sans doute de peu : les réglages essayés changent à peine les résultats.
-- Deux stations proches (moins de 3 km) peuvent tomber dans des plis différents. Le modèle apprend alors sur un air
-  très semblable à celui qu'il doit prédire, ce qui peut flatter un peu les résultats. Des plis par région
-  éviteraient ce biais.
+- Deux stations proches peuvent tomber dans des plis différents, ce qui flatte un peu les résultats : environ
+  3 points de paires EPA d'après les plis par région du notebook 06.
 
 ## Avec plus de temps
 
-1. **Une validation dans le temps** (apprendre en 2024, tester en 2025), pour savoir s'il faut réapprendre chaque
-   année.
+1. **Un réapprentissage glissant** (par exemple chaque mois, sur les 12 mois précédents), pour savoir à quel rythme
+   il faut réapprendre le modèle.
 2. **Un repérage des capteurs défectueux sans station**, par exemple à partir de leur écart persistant aux voisins.
 3. **Corriger la sous-estimation des pics**, par exemple en recalibrant la pente sur les prédictions.
 4. **Élargir le rayon des voisins** ou utiliser d'autres capteurs, pour réduire les heures sans voisins.
@@ -140,11 +152,11 @@ VS Code ou Jupyter, installez-le avec `brew install libomp`.
 ```bash
 git clone -b version-simple https://github.com/lwdata75/air-calib.git && cd air-calib
 make install     # uv sync --frozen
-make test        # 12 tests, hors ligne (≈ 1 s)
+make test        # 14 tests, hors ligne (≈ 3 s)
 make sample      # toute la chaîne sur 10 capteurs et un mois, entraînement compris (≈ 1 min)
 make data        # volume complet : ≈ 2 h, presque tout pour le téléchargement
 make train       # les modèles sur toutes les stations (≈ 1 min)
-make notebooks   # réexécute les notebooks 01 à 04 (≈ 30 s)
+make notebooks   # réexécute les notebooks 01 à 06 (≈ 4 min, surtout le 06)
 ```
 
 **Avec pip seul :**

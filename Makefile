@@ -3,7 +3,7 @@ PY := uv run python
 
 # macOS : LightGBM a besoin d'OpenMP. Sans Homebrew, on pointe vers la copie livrée avec scikit-learn
 # (la variable doit être donnée directement à Python : `uv run` ne la transmet pas).
-OPENMP := DYLD_FALLBACK_LIBRARY_PATH=$(shell .venv/bin/python -c "import sklearn, pathlib; print(pathlib.Path(sklearn.__file__).parent / '.dylibs')" 2>/dev/null)
+OPENMP := DYLD_FALLBACK_LIBRARY_PATH="$(shell .venv/bin/python -c "import sklearn, pathlib; print(pathlib.Path(sklearn.__file__).parent / '.dylibs')" 2>/dev/null)"
 
 .PHONY: install requirements data sample train notebooks test lint
 
@@ -27,8 +27,8 @@ sample:  ## la même chaîne, entraînement compris, sur 10 capteurs et un mois 
 train:  ## entraîne les modèles retenus sur toutes les stations (5 plis)
 	$(PY) scripts/04_entrainer.py
 
-notebooks:  ## réexécute les notebooks 01 à 05
-	$(OPENMP) .venv/bin/jupyter nbconvert --to notebook --execute --inplace notebooks/0[1-5]_*.ipynb
+notebooks:  ## réexécute les notebooks 01 à 06
+	$(OPENMP) .venv/bin/jupyter nbconvert --to notebook --execute --inplace notebooks/0[1-6]_*.ipynb
 
 test:  ## tests unitaires (hors ligne)
 	uv run pytest -q

@@ -105,6 +105,41 @@ def plis_par_station(table: pl.DataFrame) -> pl.DataFrame:
     return table.join(stations.select("station").with_columns(pli=pl.Series(plis)), on="station")
 
 
+def regions(stations: pl.DataFrame, rayon_km: float = P.RAYON_REGION_KM) -> pl.DataFrame:
+    """Regroupe les stations (colonnes station, lat, lon) : deux stations à `rayon_km` ou moins, ou reliées
+    par une chaîne de telles stations, sont dans la même région. Renvoie station → region (un entier)."""
+    noms = stations["station"].to_list()
+    proches = (
+        stations.join(stations, how="cross", suffix="_b")
+        .filter(
+            (pl.col("station") < pl.col("station_b"))
+            & (distance_km(pl.col("lat"), pl.col("lon"), pl.col("lat_b"), pl.col("lon_b")) <= rayon_km)
+        )
+        .select("station", "station_b")
+    )
+    region = {s: i for i, s in enumerate(noms)}
+    for a, b in proches.iter_rows():  # on fusionne les régions de a et de b
+        ancienne, nouvelle = region[b], region[a]
+        if ancienne != nouvelle:
+            region = {s: nouvelle if r == ancienne else r for s, r in region.items()}
+    return pl.DataFrame({"station": noms, "region": [region[s] for s in noms]})
+
+
+def plis_par_region(table: pl.DataFrame, regions_des_stations: pl.DataFrame) -> pl.DataFrame:
+    """Comme `plis_par_station`, mais une région entière est toujours dans le même pli.
+
+    Deux stations voisines voient à peu près le même air : si l'une est en apprentissage et l'autre en
+    test, le modèle a déjà vu les épisodes de pollution qu'il doit prédire.
+    """
+    zones = regions_des_stations.sort("station")
+    plis = np.empty(zones.height, dtype=int)
+    for pli, (_, test) in enumerate(GroupKFold(n_splits=P.N_PLIS).split(zones, groups=zones["region"])):
+        plis[test] = pli
+    return table.drop("pli", strict=False).join(
+        zones.select("station").with_columns(pli=pl.Series(plis)), on="station"
+    )
+
+
 def construire(heures: pl.DataFrame, mesures: pl.DataFrame, positions: pl.DataFrame) -> pl.DataFrame:
     """Toutes les variables, la cible (`reference`) et le pli de chaque heure-paire."""
     table = heures.with_columns(

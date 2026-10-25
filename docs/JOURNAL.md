@@ -54,3 +54,12 @@ voisins fait mieux. Le modèle retenu prend le LightGBM complet quand le capteur
 **14. Contre-vérification des métriques.** Tous nos chiffres sortent d'une seule fonction (`resume`). Le notebook 05
 les recalcule sans `src/`, avec des sommes en numpy, à partir des prédictions sauvegardées, et vérifie qu'ils
 concordent avec le journal des essais à l'arrondi près.
+
+**15. `make notebooks` et les chemins avec une espace.** Le chemin d'OpenMP passé à LightGBM n'était pas entre
+guillemets : la commande échouait dans un dossier comme « Application Support ». Corrigé dans le `Makefile`.
+
+**16. Robustesse de l'évaluation.** Le notebook 06 met nos chiffres à l'épreuve. Un bootstrap par station donne un
+intervalle à 95 % d'environ 68–82 % de paires EPA ; le combiné et le réglage 1 sont indistinguables. Des plis par
+région (stations à 10 km ou moins regroupées) coûtent environ 3 points. Mais appris sur une année et testé sur
+l'autre, le modèle perd de 10 à 23 points : il faut le réapprendre régulièrement. C'est la limite la plus
+importante qu'on ait trouvée.

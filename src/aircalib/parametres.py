@@ -85,6 +85,9 @@ HEURES_MIN_PAIRE = 500  # une paire est notée en horaire si elle a au moins 500
 JOURS_MIN_PAIRE = 30  # … et en journalier si elle a au moins 30 jours complets
 HEURES_MIN_JOUR = 18  # un jour est complet avec au moins 18 heures valides
 BANDES_DISTANCE_KM = [0.5, 1.0, 1.5]
+# Contrôles de robustesse (notebook 06).
+RAYON_REGION_KM = 10.0  # deux stations à 10 km ou moins sont dans la même région (et donc le même pli)
+TIRAGES_BOOTSTRAP = 1000  # tirages de stations pour les intervalles de confiance
 
 
 def dossier_donnees(echantillon: bool = False) -> Path:
