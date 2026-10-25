@@ -176,10 +176,6 @@ L'assistant a écrit une grande partie du code, des tests et des notebooks sous 
 calculé par le code sur les vraies données. Le [journal de bord](docs/JOURNAL.md) garde aussi les erreurs corrigées
 en route.
 
-## Méthodes issues de nos parcours
-
-> **[À ÉCRIRE PAR L'ÉQUIPE]** — Les méthodes ou habitudes que chacun a apportées de sa formation ou de son expérience.
-
 ## Auteurs
 
-[NOMS DU GROUPE]
+Leo Weiss, Malo Le Couls et Leith Majdoub
