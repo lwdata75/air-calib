@@ -1,4 +1,4 @@
-# air-calib (version simple) — corriger un capteur de particules fines à 20 €
+# air-calib (version simple) — corriger un capteur de particules fines à 30 €
 
 On corrige par apprentissage automatique les mesures de PM2.5 du SDS011, le capteur citoyen le plus répandu du réseau
 Sensor.Community, en le comparant aux stations officielles de l'Agence européenne de l'environnement (EEA). Périmètre :
@@ -13,7 +13,7 @@ Une version plus poussée de ce travail se trouve sur la branche main.
 ## La question métier
 
 Une collectivité qui veut connaître la pollution rue par rue ne peut pas installer des stations officielles partout
-(plusieurs dizaines de milliers d'euros chacune). **Une fois corrigé, un capteur à 20 € donne-t-il une mesure assez
+(plusieurs dizaines de milliers d'euros chacune). **Une fois corrigé, un capteur à environ 30 € donne-t-il une mesure assez
 proche d'une station pour être utile là où il n'y en a pas ?**
 
 **Notre réponse : oui, avec des conditions.**
@@ -22,6 +22,9 @@ proche d'une station pour être utile là où il n'y en a pas ?**
   39 % pour le capteur brut.
 - Mais il faut que le capteur ait des capteurs voisins : sans voisins, seulement 44 % des paires passent les cibles.
 - Et le modèle sous-estime encore les pics.
+
+Ces chiffres sont mesurés sur des capteurs à 1,5 km ou moins d'une station que le modèle n'a jamais vue. Pour un
+capteur vraiment loin de toute station, ils restent une estimation, pas une mesure.
 
 ## Les données
 
@@ -39,7 +42,7 @@ Rien n'est versionné dans `data/` (2,9 Go une fois téléchargé). Licence du c
 flowchart TD
     A["01 télécharger<br/>capteurs, EEA, DWD"] --> B["02 nettoyer, apparier<br/>03 construire les variables"]
     B --> C["04 entraîner et évaluer<br/>5 plis par station"]
-    C --> D["notebooks 01 à 04"]
+    C --> D["notebooks 01 à 05"]
 ```
 
 1. **Télécharger** (`scripts/01_telecharger.py`) : les stations EEA, les capteurs à 1,5 km ou moins d'une station, leurs
@@ -53,7 +56,9 @@ Les notebooks racontent le chemin, dans l'ordre :
 - [01 — les données brutes](notebooks/01_donnees_brutes.ipynb) ;
 - [02 — le nettoyage et l'« avant »](notebooks/02_nettoyage_et_appariement.ipynb) ;
 - [03 — l'entraînement sur 20 % des stations](notebooks/03_entrainement.ipynb) ;
-- [04 — les résultats](notebooks/04_resultats.ipynb).
+- [04 — les résultats](notebooks/04_resultats.ipynb) ;
+- [05 — la contre-vérification](notebooks/05_contre_verification.ipynb) : les métriques recalculées à la main, sans
+  `src/`, pour vérifier qu'elles ne dépendent pas d'un bug.
 
 Le [journal de bord](docs/JOURNAL.md) garde les problèmes rencontrés et nos décisions.
 
@@ -82,8 +87,13 @@ Paires saines, validation croisée en 5 plis par station ([`reports/resultats.cs
 | Capteur brut | 12,42 | 0,69 | 0,62 | 25,3 / 40,9 |
 | Régression linéaire (PM2.5, humidité, température) | 7,05 | 0,38 | 0,19 | 0,0 / 0,0 |
 | LightGBM, réglages par défaut | 3,79 | 0,85 | 0,80 | 74,0 / 84,8 |
+| LightGBM, réglage 1 (apprentissage plus lent, 500 arbres) | 3,73 | 0,86 | 0,81 | 75,7 / 86,5 |
 | LightGBM sans les variables de voisins | 4,70 | 0,79 | 0,68 | 49,6 / 65,4 |
 | **Modèle retenu (combiné)** | **3,74** | **0,85** | **0,80** | **75,7 / 86,5** |
+
+Le modèle combiné a été choisi sur l'échantillon de 20 % des stations, où il faisait mieux que le réglage 1 (RMSE 4,60
+contre 4,75). Sur toutes les stations, les deux se valent. On garde le combiné : il a été choisi avant de voir ces
+chiffres, et il s'entraîne presque deux fois plus vite (17 s contre 30 s).
 
 Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
 
@@ -104,6 +114,11 @@ Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
 - Une heure sur cinq n'a pas de voisins, et la correction y est nettement moins bonne.
 - On repère les capteurs défectueux grâce à la station, ce qui est impossible là où il n'y en a pas.
 - La validation est faite par station, pas dans le temps : on n'a pas testé si un modèle appris en 2024 tient en 2025.
+- Les 20 % de stations qui ont servi à choisir le modèle font aussi partie de l'évaluation finale. Les chiffres sont
+  donc un peu optimistes, mais sans doute de peu : les réglages essayés changent à peine les résultats.
+- Deux stations proches (moins de 3 km) peuvent tomber dans des plis différents. Le modèle apprend alors sur un air
+  très semblable à celui qu'il doit prédire, ce qui peut flatter un peu les résultats. Des plis par région
+  éviteraient ce biais.
 
 ## Avec plus de temps
 

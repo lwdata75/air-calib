@@ -50,3 +50,7 @@ significatif (3 paires sur 60, avec un RMSE meilleur sans elles). On les garde s
 **13. Le modèle combiné.** L'ablation montre que, sur les heures sans voisins, le modèle appris sans les variables de
 voisins fait mieux. Le modèle retenu prend le LightGBM complet quand le capteur a des voisins, l'autre sinon :
 **75,7 % des paires EPA en horaire, 86,5 % en journalier** sur toutes les stations (notebooks 03 et 04).
+
+**14. Contre-vérification des métriques.** Tous nos chiffres sortent d'une seule fonction (`resume`). Le notebook 05
+les recalcule sans `src/`, avec des sommes en numpy, à partir des prédictions sauvegardées, et vérifie qu'ils
+concordent avec le journal des essais à l'arrondi près.

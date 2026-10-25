@@ -27,8 +27,8 @@ sample:  ## la même chaîne, entraînement compris, sur 10 capteurs et un mois 
 train:  ## entraîne les modèles retenus sur toutes les stations (5 plis)
 	$(PY) scripts/04_entrainer.py
 
-notebooks:  ## réexécute les notebooks 01 à 04
-	$(OPENMP) .venv/bin/jupyter nbconvert --to notebook --execute --inplace notebooks/0[1-4]_*.ipynb
+notebooks:  ## réexécute les notebooks 01 à 05
+	$(OPENMP) .venv/bin/jupyter nbconvert --to notebook --execute --inplace notebooks/0[1-5]_*.ipynb
 
 test:  ## tests unitaires (hors ligne)
 	uv run pytest -q
