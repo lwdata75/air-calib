@@ -63,3 +63,7 @@ intervalle à 95 % d'environ 69–82 % de paires EPA ; le combiné et le réglag
 région (stations à 10 km ou moins regroupées) coûtent environ 3 à 4 points. Mais appris sur une année et testé sur
 l'autre, le modèle perd de 10 à 23 points : il faut le réapprendre régulièrement. C'est la limite la plus
 importante qu'on ait trouvée.
+
+**17. Le rendu.** On ne garde que ce que demande le cours : les scripts et le paquet `aircalib`, les notebooks,
+`requirements.txt` (généré depuis `uv.lock`) et le README, plus ce journal. Les tests, le `Makefile` et la licence
+sont retirés ; les commandes à lancer sont dans le README.

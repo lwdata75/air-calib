@@ -36,7 +36,7 @@ capteur vraiment loin de toute station, ils restent une estimation, pas une mesu
 | [EEA](https://eeadmz1-downloads-webapp.azurewebsites.net/), données E1a | référence : PM2.5 horaire de 179 stations | CC BY 4.0 — « © European Environment Agency » |
 | [DWD](https://opendata.dwd.de) | humidité et température horaires, 107 stations | CC BY 4.0 — « Source : Deutscher Wetterdienst » |
 
-Rien n'est versionné dans `data/` (2,9 Go une fois téléchargé). Licence du code : [MIT](LICENSE).
+Rien n'est versionné dans `data/` (2,9 Go une fois téléchargé).
 
 ## Le pipeline en trois étapes
 
@@ -143,37 +143,34 @@ Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
 ## Reproduire
 
 Prérequis : Python 3.12, environ 3 Go de disque, une connexion internet. Testé sur macOS (Apple Silicon). Sur macOS,
-LightGBM a besoin d'OpenMP : les scripts et `make notebooks` se débrouillent seuls, mais pour exécuter un notebook dans
-VS Code ou Jupyter, installez-le avec `brew install libomp`.
+LightGBM a besoin d'OpenMP : les scripts se débrouillent seuls, mais pour exécuter les notebooks (VS Code ou Jupyter),
+installez-le avec `brew install libomp`.
 
 **Avec [uv](https://docs.astral.sh/uv/)** (recommandé) :
 
 ```bash
 git clone -b version-simple https://github.com/lwdata75/air-calib.git && cd air-calib
-make install     # uv sync --frozen
-make test        # 14 tests, hors ligne (≈ 3 s)
-make sample      # toute la chaîne sur 10 capteurs et un mois, entraînement compris (≈ 1 min)
-make data        # volume complet : ≈ 2 h, presque tout pour le téléchargement
-make train       # les modèles sur toutes les stations (≈ 1 min)
-make notebooks   # réexécute les notebooks 01 à 06 (≈ 1 min 30, surtout le 06)
+uv sync --frozen                                      # l'environnement exact de uv.lock
+
+# Essai rapide : toute la chaîne sur 10 capteurs et un mois, entraînement compris (≈ 1 min)
+uv run python scripts/01_telecharger.py --echantillon   # puis 02, 03 et 04 avec --echantillon
+
+# Volume complet (≈ 2 h, presque tout pour le téléchargement)
+uv run python scripts/01_telecharger.py
+uv run python scripts/02_nettoyer.py
+uv run python scripts/03_construire_variables.py
+uv run python scripts/04_entrainer.py                 # les modèles sur toutes les stations (≈ 1 min)
+
+uv run jupyter lab notebooks/                         # les notebooks 01 à 06 (≈ 1 min 30 pour tout réexécuter)
 ```
 
 **Avec pip seul :**
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt pytest   # installe aussi le paquet aircalib (ligne « -e . »)
-python -m pytest -q
+pip install -r requirements.txt   # installe aussi le paquet aircalib (ligne « -e . »)
 python scripts/01_telecharger.py --echantillon   # puis 02, 03 et 04 avec --echantillon
 ```
-
-## Utilisation de l'IA
-
-Ce projet a été réalisé avec l'aide de **Claude Code** (Anthropic), un assistant de programmation, comme le cours
-l'autorise. Nous avons fixé la question, le périmètre et les règles, validé chaque étape et tranché les décisions.
-L'assistant a écrit une grande partie du code, des tests et des notebooks sous notre direction. Chaque chiffre est
-calculé par le code sur les vraies données. Le [journal de bord](docs/JOURNAL.md) garde aussi les erreurs corrigées
-en route.
 
 ## Auteurs
 

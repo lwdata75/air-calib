@@ -34,7 +34,7 @@ def importer_lightgbm():
     """Importe LightGBM, qui a besoin de la bibliothèque OpenMP (absente de macOS sans Homebrew).
 
     Dans un script, si OpenMP manque, on relance le script en lui indiquant la copie de scikit-learn.
-    Dans un notebook, ce n'est pas possible : il faut `brew install libomp`, ou lancer `make notebooks`.
+    Dans un notebook, ce n'est pas possible : il faut `brew install libomp`.
     """
     try:
         import lightgbm
@@ -46,7 +46,7 @@ def importer_lightgbm():
             env = dict(os.environ, DYLD_FALLBACK_LIBRARY_PATH=dossier_openmp(), AIRCALIB_OPENMP="1")
             os.execve(sys.executable, [sys.executable, *sys.argv], env)
         raise RuntimeError(
-            "LightGBM ne trouve pas OpenMP : installez-le (brew install libomp) ou lancez make notebooks."
+            "LightGBM ne trouve pas OpenMP : installez-le avec brew install libomp."
         ) from erreur
     return lightgbm
 
