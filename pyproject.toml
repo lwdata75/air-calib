@@ -1,7 +1,7 @@
 [project]
 name = "aircalib"
 version = "1.0.0"
-description = "Corriger un capteur de particules à 30 € (SDS011) à partir des stations officielles : version simplifiée."
+description = "Corriger un capteur de particules à 30 € (SDS011) à partir des stations officielles."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

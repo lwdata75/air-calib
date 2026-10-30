@@ -1,4 +1,4 @@
-# air-calib (version simple) — corriger un capteur de particules fines à 30 €
+# air-calib — corriger un capteur de particules fines à 30 €
 
 On corrige par apprentissage automatique les mesures de PM2.5 du SDS011, le capteur citoyen le plus répandu du réseau
 Sensor.Community, en le comparant aux stations officielles de l'Agence européenne de l'environnement (EEA). Périmètre :
@@ -7,8 +7,6 @@ l'agence américaine de l'environnement (EPA) pour les capteurs à bas coût.
 
 > **Le chiffre clé.** Sur 419 paires capteur–station saines, la part des capteurs qui passent les cibles EPA passe de
 > **25 % à 76 %** en horaire, et de **41 % à 87 %** en moyenne journalière. Le RMSE passe de 12,4 à 3,7 µg/m³.
-
-Une version plus poussée de ce travail se trouve sur la branche main.
 
 ## La question métier
 
@@ -149,7 +147,7 @@ installez-le avec `brew install libomp`.
 **Avec [uv](https://docs.astral.sh/uv/)** (recommandé) :
 
 ```bash
-git clone -b version-simple https://github.com/lwdata75/air-calib.git && cd air-calib
+git clone https://github.com/lwdata75/air-calib.git && cd air-calib
 uv sync --frozen                                      # l'environnement exact de uv.lock
 
 # Essai rapide : toute la chaîne sur 10 capteurs et un mois, entraînement compris (≈ 1 min)
