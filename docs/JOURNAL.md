@@ -59,7 +59,7 @@ concordent avec le journal des essais à l'arrondi près.
 guillemets : la commande échouait dans un dossier comme « Application Support ». Corrigé dans le `Makefile`.
 
 **16. Robustesse de l'évaluation.** Le notebook 06 met nos chiffres à l'épreuve. Un bootstrap par station donne un
-intervalle à 95 % d'environ 68–82 % de paires EPA ; le combiné et le réglage 1 sont indistinguables. Des plis par
-région (stations à 10 km ou moins regroupées) coûtent environ 3 points. Mais appris sur une année et testé sur
+intervalle à 95 % d'environ 69–82 % de paires EPA ; le combiné et le réglage 1 sont indistinguables. Des plis par
+région (stations à 10 km ou moins regroupées) coûtent environ 3 à 4 points. Mais appris sur une année et testé sur
 l'autre, le modèle perd de 10 à 23 points : il faut le réapprendre régulièrement. C'est la limite la plus
 importante qu'on ait trouvée.

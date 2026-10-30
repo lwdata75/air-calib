@@ -99,11 +99,10 @@ Le modèle combiné a été choisi sur l'échantillon de 20 % des stations, où 
 contre 4,75). Sur toutes les stations, les deux se valent. On garde le combiné : il a été choisi avant de voir ces
 chiffres, et il s'entraîne presque deux fois plus vite (17 s contre 30 s).
 
-**Quelle confiance accorder à ces chiffres ?** Le notebook 06 les met à l'épreuve, sur un nouveau téléchargement
-de l'archive (qui donne 75,2 % au lieu de 75,7 %) :
-- un bootstrap par station donne un intervalle à 95 % d'environ **68 à 82 %** de paires EPA en horaire. L'écart
+**Quelle confiance accorder à ces chiffres ?** Le notebook 06 les met à l'épreuve :
+- un bootstrap par station donne un intervalle à 95 % d'environ **69 à 82 %** de paires EPA en horaire. L'écart
   entre le combiné et le réglage 1 contient zéro : les deux sont indistinguables ;
-- avec des plis par région (stations à 10 km ou moins dans le même pli), on perd environ 3 points ;
+- avec des plis par région (stations à 10 km ou moins dans le même pli), on perd environ 3 à 4 points ;
 - appris sur une année et testé sur l'autre, le modèle perd de 10 à 23 points.
 
 Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
@@ -130,7 +129,7 @@ Le même modèle, selon les situations (% de paires EPA, horaire / journalier) :
 - Les 20 % de stations qui ont servi à choisir le modèle font aussi partie de l'évaluation finale. Les chiffres sont
   donc un peu optimistes, mais sans doute de peu : les réglages essayés changent à peine les résultats.
 - Deux stations proches peuvent tomber dans des plis différents, ce qui flatte un peu les résultats : environ
-  3 points de paires EPA d'après les plis par région du notebook 06.
+  3 à 4 points de paires EPA d'après les plis par région du notebook 06.
 
 ## Avec plus de temps
 
@@ -156,7 +155,7 @@ make test        # 14 tests, hors ligne (≈ 3 s)
 make sample      # toute la chaîne sur 10 capteurs et un mois, entraînement compris (≈ 1 min)
 make data        # volume complet : ≈ 2 h, presque tout pour le téléchargement
 make train       # les modèles sur toutes les stations (≈ 1 min)
-make notebooks   # réexécute les notebooks 01 à 06 (≈ 4 min, surtout le 06)
+make notebooks   # réexécute les notebooks 01 à 06 (≈ 1 min 30, surtout le 06)
 ```
 
 **Avec pip seul :**
